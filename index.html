@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="GeoField">
+  <meta name="theme-color" content="#14181d">
+  <title>GeoField</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="icon-192.png">
+  <link rel="icon" href="icon-192.png">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header id="topbar">
+    <button id="btn-back" class="icon-btn hidden" aria-label="Back">&#8249;</button>
+    <div id="title-wrap">
+      <div id="title">GeoField</div>
+      <div id="subtitle"></div>
+    </div>
+    <button id="btn-top-action" class="text-btn hidden"></button>
+  </header>
+
+  <main id="views">
+    <!-- MAP -->
+    <section id="view-map" class="view active">
+      <div id="map"></div>
+      <div id="crosshair" class="hidden">+</div>
+      <div id="map-tools">
+        <button id="btn-layers" class="fab-sm" title="Layers">&#9776;</button>
+        <button id="btn-locate" class="fab-sm" title="My location">&#10148;</button>
+        <button id="btn-crosshair" class="fab-sm" title="Crosshair">&#8853;</button>
+      </div>
+      <div id="gps-panel">
+        <div id="gps-line1">GPS: waiting…</div>
+        <div id="gps-line2"></div>
+      </div>
+      <div id="add-buttons">
+        <button id="btn-add-gps" class="fab">+ GPS point</button>
+        <button id="btn-add-cross" class="fab secondary hidden">+ At crosshair</button>
+      </div>
+    </section>
+
+    <!-- STATIONS LIST -->
+    <section id="view-stations" class="view">
+      <div class="toolbar">
+        <input id="station-search" type="search" placeholder="Search stations, samples, lithology…">
+      </div>
+      <div id="station-list" class="list"></div>
+    </section>
+
+    <!-- STATION DETAIL -->
+    <section id="view-station" class="view">
+      <div class="seg" id="station-tabs">
+        <button data-tab="data" class="active">Data</button>
+        <button data-tab="photos">Photos</button>
+        <button data-tab="structures">Structures</button>
+        <button data-tab="log">Log</button>
+      </div>
+      <div id="station-body"></div>
+    </section>
+
+    <!-- LOG -->
+    <section id="view-log" class="view">
+      <div class="toolbar">
+        <select id="log-station-select"></select>
+      </div>
+      <div id="log-body"></div>
+    </section>
+
+    <!-- STRUCTURES (project wide) -->
+    <section id="view-structs" class="view">
+      <div id="structs-body"></div>
+    </section>
+
+    <!-- PROJECT -->
+    <section id="view-project" class="view">
+      <div id="project-body"></div>
+    </section>
+  </main>
+
+  <nav id="tabbar">
+    <button data-view="map" class="active"><span>&#9673;</span>Map</button>
+    <button data-view="stations"><span>&#9776;</span>Stations</button>
+    <button data-view="log"><span>&#9636;</span>Log</button>
+    <button data-view="structs"><span>&#9711;</span>Structures</button>
+    <button data-view="project"><span>&#9881;</span>Project</button>
+  </nav>
+
+  <div id="modal" class="hidden">
+    <div id="modal-card">
+      <div id="modal-head"><div id="modal-title"></div><button id="modal-close" class="icon-btn">&times;</button></div>
+      <div id="modal-body"></div>
+    </div>
+  </div>
+  <div id="toast" class="hidden"></div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.9.0/proj4.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <script src="https://unpkg.com/shpjs@3.6.3/dist/shp.min.js"></script>
+  <script src="https://unpkg.com/@tmcw/togeojson@5.8.1/dist/togeojson.umd.js"></script>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
