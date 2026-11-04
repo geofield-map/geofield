@@ -107,42 +107,82 @@ const DEFS = `<defs>${PATTERNS.map(([id, w, h, , sym]) =>
   `<pattern id="${id}" width="${w}" height="${h}" patternUnits="userSpaceOnUse">${sym.replace(/INK/g, '#222')}</pattern>` +
   `<pattern id="${id}-l" width="${w}" height="${h}" patternUnits="userSpaceOnUse">${sym.replace(/INK/g, '#f2f2f2')}</pattern>`).join('')}</defs>`;
 
-// ---------- lithology picker (same look as the colour picker, with symbol swatches) ----------
+// ---------- visual pickers (same look as the colour picker) for lithology, bed shape and base contact ----------
 export function lithSwatch(name, w = 40, h = 26) {
   const pat = patternFor(name), fill = DEFAULT_FILL[pat];
   return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"><rect width="${w}" height="${h}" fill="${fill}"/>
     <rect width="${w}" height="${h}" fill="url(#${pat}${isDark(fill) ? '-l' : ''})" stroke="#000" stroke-width=".8"/></svg>`;
 }
 
-let lithOverlay = null;
-async function recentLiths() { const r = await db.get('meta', 'recentLiths'); return r ? r.value : []; }
-async function rememberLith(v) {
-  const list = (await recentLiths()).filter(x => x !== v); list.unshift(v);
-  await db.put('meta', { id: 'recentLiths', value: list.slice(0, 6) });
+// A sandstone bed drawn with the chosen outline, on a white background.
+function shapeSwatch(shape, w = 40, h = 26) {
+  const d = bedPath(shape, 3, w - 8, 4, h - 8);
+  return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"><rect width="${w}" height="${h}" fill="#fff"/>
+    <path d="${d}" fill="${DEFAULT_FILL['p-sand']}"/><path d="${d}" fill="url(#p-sand)" stroke="#000" stroke-width=".9"/></svg>`;
 }
 
-export async function pickLithology(current) {
-  const rec = await recentLiths();
-  if (!lithOverlay) {
-    lithOverlay = document.createElement('div');
-    lithOverlay.id = 'lith-picker';
-    document.body.appendChild(lithOverlay);
+// Two beds (shale over sandstone) separated by the chosen contact, drawn as in the log.
+function contactSwatch(contact, w = 40, h = 26) {
+  const m = h / 2;
+  let line;
+  if (contact === 'Erosional' || contact === 'Unconformity') {
+    let d = `M0 ${m}`; for (let x = 0; x < w; x += 8) d += ' q2 -4 4 0 q2 4 4 0';
+    line = `<path d="${d}" fill="none" stroke="#000" stroke-width="${contact === 'Unconformity' ? 2.2 : 1.4}"/>`;
+  } else if (contact === 'Gradational') {
+    line = `<line x1="0" y1="${m}" x2="${w}" y2="${m}" stroke="#000" stroke-dasharray="4 3"/>`;
+  } else if (contact === 'Faulted') {
+    line = `<line x1="0" y1="${m + 5}" x2="${w}" y2="${m - 5}" stroke="#d00" stroke-width="2"/>`;
+  } else if (contact === 'Covered') {
+    line = `<rect x="0" y="${m - 4}" width="${w}" height="8" fill="url(#p-covered)"/>`;
+  } else {
+    line = `<line x1="0" y1="${m}" x2="${w}" y2="${m}" stroke="#000" stroke-width="1.2"/>`;
   }
-  const chip = name => `<button class="cp-chip" data-v="${esc(name)}"><span class="lp-sw">${lithSwatch(name)}</span><span class="cp-txt"><span>${esc(name)}</span></span></button>`;
+  return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">
+    <rect width="${w}" height="${m}" fill="${DEFAULT_FILL['p-shale']}"/><rect width="${w}" height="${m}" fill="url(#p-shale)"/>
+    <rect y="${m}" width="${w}" height="${m}" fill="${DEFAULT_FILL['p-sand']}"/><rect y="${m}" width="${w}" height="${m}" fill="url(#p-sand)"/>
+    ${line}<rect width="${w}" height="${h}" fill="none" stroke="#000" stroke-width=".8"/></svg>`;
+}
+
+// built on first use: BED_SHAPES is declared further down this file
+function pickerConfig(kind) {
+  return {
+    lith: { title: 'Choose lithology', placeholder: 'Tap to choose a lithology', groups: LITH_GROUPS, swatch: lithSwatch, search: true, recentKey: 'recentLiths' },
+    shape: { title: 'Shape in log', placeholder: 'Straight', groups: [['Bed outline', BED_SHAPES]], swatch: shapeSwatch },
+    contact: { title: 'Base contact', placeholder: 'Sharp', groups: [['Contact with the bed below', CONTACTS]], swatch: contactSwatch },
+  }[kind];
+}
+
+let pickerOverlay = null;
+async function recentOf(key) { if (!key) return []; const r = await db.get('meta', key); return r ? r.value : []; }
+async function remember(key, v) {
+  if (!key) return;
+  const list = (await recentOf(key)).filter(x => x !== v); list.unshift(v);
+  await db.put('meta', { id: key, value: list.slice(0, 6) });
+}
+
+async function pickVisual(kind, current) {
+  const cfg = pickerConfig(kind);
+  const rec = await recentOf(cfg.recentKey);
+  if (!pickerOverlay) {
+    pickerOverlay = document.createElement('div');
+    pickerOverlay.id = 'lith-picker';
+    document.body.appendChild(pickerOverlay);
+  }
   ensureDefs();
-  lithOverlay.innerHTML = `<div class="cp-card">
-    <div class="cp-head"><b>Choose lithology</b><button class="icon-btn" data-act="close">&times;</button></div>
-    <div class="cp-tools"><input type="search" placeholder="Search: limestone, sand, dolomite…" class="cp-search">
-      <div class="btns" style="margin:8px 0 0"><button class="btn small" data-act="custom">Type my own</button><button class="btn small danger" data-act="clear">Clear</button></div></div>
+  const chip = name => `<button class="cp-chip ${name === current ? 'cp-on' : ''}" data-v="${esc(name)}"><span class="lp-sw">${cfg.swatch(name)}</span><span class="cp-txt"><span>${esc(name)}</span></span></button>`;
+  const tools = cfg.search ? `<div class="cp-tools"><input type="search" placeholder="Search: limestone, sand, dolomite…" class="cp-search">
+      <div class="btns" style="margin:8px 0 0"><button class="btn small" data-act="custom">Type my own</button><button class="btn small danger" data-act="clear">Clear</button></div></div>` : '';
+  pickerOverlay.innerHTML = `<div class="cp-card ${cfg.search ? '' : 'cp-short'}">
+    <div class="cp-head"><b>${cfg.title}</b><button class="icon-btn" data-act="close">&times;</button></div>${tools}
     <div class="cp-body">
       ${rec.length ? `<div class="cp-group" data-fixed><div class="group-title">Recently used</div><div class="cp-grid">${rec.map(chip).join('')}</div></div>` : ''}
-      ${LITH_GROUPS.map(([g, list]) => `<div class="cp-group"><div class="group-title">${g}</div><div class="cp-grid">${list.map(chip).join('')}</div></div>`).join('')}
+      ${cfg.groups.map(([g, list]) => `<div class="cp-group"><div class="group-title">${g}</div><div class="cp-grid">${list.map(chip).join('')}</div></div>`).join('')}
     </div></div>`;
-  lithOverlay.classList.remove('hidden');
+  pickerOverlay.classList.remove('hidden');
   return new Promise(resolve => {
-    const done = v => { lithOverlay.classList.add('hidden'); lithOverlay.onclick = null; resetViewport(); if (v) rememberLith(v); resolve(v); };
-    lithOverlay.onclick = e => {
-      if (e.target === lithOverlay) return done(undefined);
+    const done = v => { pickerOverlay.classList.add('hidden'); pickerOverlay.onclick = null; resetViewport(); if (v) remember(cfg.recentKey, v); resolve(v); };
+    pickerOverlay.onclick = e => {
+      if (e.target === pickerOverlay) return done(undefined);
       const btn = e.target.closest('button');
       if (!btn) return;
       if (btn.dataset.act === 'close') return done(undefined);
@@ -150,10 +190,10 @@ export async function pickLithology(current) {
       if (btn.dataset.act === 'custom') { const v = window.prompt('Lithology', current || ''); if (v != null) done(v.trim()); return; }
       if (btn.dataset.v != null) done(btn.dataset.v);
     };
-    const search = lithOverlay.querySelector('.cp-search');
-    search.oninput = () => {
+    const search = pickerOverlay.querySelector('.cp-search');
+    if (search) search.oninput = () => {
       const q = search.value.toLowerCase().trim();
-      lithOverlay.querySelectorAll('.cp-group').forEach(g => {
+      pickerOverlay.querySelectorAll('.cp-group').forEach(g => {
         let any = false;
         g.querySelectorAll('.cp-chip').forEach(c => { const show = !q || c.dataset.v.toLowerCase().includes(q); c.style.display = show ? '' : 'none'; if (show) any = true; });
         g.style.display = any && !(q && g.hasAttribute('data-fixed')) ? '' : 'none';
@@ -171,22 +211,25 @@ function ensureDefs() {
 }
 
 // A button, not a text box: nothing takes keyboard focus (see resetViewport in ui.js).
-function lithFieldHtml(value) {
+function visualFieldHtml(kind, id, value) {
   ensureDefs();
-  return `<button type="button" class="colour-field lith-field"><span class="lp-sw small">${value ? lithSwatch(value, 30, 24) : ''}</span>
-    <span class="cf-text ${value ? '' : 'placeholder'}">${esc(value || 'Tap to choose a lithology')}</span>
-    <input type="hidden" id="bd-lith" value="${esc(value || '')}"></button>`;
+  const cfg = pickerConfig(kind), shown = value || (kind === 'lith' ? '' : cfg.placeholder);
+  return `<button type="button" class="colour-field visual-field" data-kind="${kind}"><span class="lp-sw small">${shown ? cfg.swatch(shown, 30, 24) : ''}</span>
+    <span class="cf-text ${shown ? '' : 'placeholder'}">${esc(shown || cfg.placeholder)}</span>
+    <input type="hidden" id="${id}" value="${esc(shown)}"></button>`;
 }
-function bindLithField(wrapper) {
+function bindVisualField(wrapper) {
+  const kind = wrapper.dataset.kind, cfg = pickerConfig(kind);
   const input = wrapper.querySelector('input');
   wrapper.addEventListener('click', async () => {
-    const v = await pickLithology(input.value);
+    let v = await pickVisual(kind, input.value);
     if (v === undefined) return;
+    if (!v && kind !== 'lith') v = cfg.placeholder; // shape and contact always keep a value
     input.value = v;
     const text = wrapper.querySelector('.cf-text');
-    text.textContent = v || 'Tap to choose a lithology';
+    text.textContent = v || cfg.placeholder;
     text.classList.toggle('placeholder', !v);
-    wrapper.querySelector('.lp-sw').innerHTML = v ? lithSwatch(v, 30, 24) : '';
+    wrapper.querySelector('.lp-sw').innerHTML = v ? cfg.swatch(v, 30, 24) : '';
   });
 }
 
@@ -277,6 +320,24 @@ export function logSvg(st) {
   const heights = beds.map(b => Math.max(10, (Number(b.thickness) || 0) * pxPerM));
   const headTop = 30, headH = 62, top = headTop + headH + 14; // gap keeps the top depth label clear of the header
   const colBottom = top + heights.reduce((a, b) => a + b, 0);
+  const order = beds.map((b, i) => i).reverse(); // drawn from the top of the page (youngest) down to the base
+  const bedTop = {};
+  { let yy = top; for (const i of order) { bedTop[i] = yy; yy += heights[i]; } }
+
+  // descriptions get all the lines they need; a block moves down when the one above is longer than its bed
+  const LH = 12, descBlocks = {};
+  let lastBottom = top - 12;
+  for (const i of order) {
+    const b = beds[i];
+    const lines = [`${i + 1}. ${b.lithology || ''}${b.thickness ? ' (' + b.thickness + ' m)' : ''}`,
+      [stripCode(b.color), b.grain, b.structures, b.fossils].map(t => String(t || '').trim()).filter(Boolean).join(', '),
+      b.description, b.sample ? 'Sample: ' + b.sample : '']
+      .filter(t => String(t || '').trim()).flatMap((t, k) => wrapText(t, 46).map(line => ({ line, first: k === 0 })));
+    const y0 = Math.max(bedTop[i] + 10, lastBottom + LH + 4);
+    descBlocks[i] = { y0, lines };
+    lastBottom = y0 + (lines.length - 1) * LH;
+  }
+  const textBottom = lastBottom + 6;
 
   // legend entries: lithologies and contacts used in this log
   // one entry per lithology + colour, so the swatch matches the beds exactly
@@ -285,12 +346,11 @@ export function logSvg(st) {
     if (!b.lithology) continue;
     const pat = patternFor(b.lithology), fill = colourHex(b.color) || DEFAULT_FILL[pat];
     if (liths.some(l => l.name === b.lithology && l.fill === fill)) continue;
-    const colourName = colourHex(b.color) ? stripCode(b.color) : '';
-    liths.push({ name: b.lithology, pat, fill, colourName });
+    liths.push({ name: b.lithology, pat, fill });
   }
   const contacts = [...new Set(beds.map(b => b.contact).filter(c => ['Erosional', 'Unconformity', 'Gradational', 'Faulted'].includes(c)))];
   const legendItems = liths.length + contacts.length;
-  const legendTop = colBottom + 80, legendRows = Math.ceil(legendItems / 2);
+  const legendTop = Math.max(colBottom + 80, textBottom + 24), legendRows = Math.ceil(legendItems / 2);
   const H = legendItems ? legendTop + 24 + legendRows * 22 + 10 : colBottom + 75;
 
   const esc2 = s => esc(s);
@@ -312,9 +372,7 @@ export function logSvg(st) {
   s += headBox(colX - 2, textX - colX - 4, 'Lithology', false);
   s += headBox(textX - 4, W - textX, 'Description', false);
 
-  // beds drawn from the top of the page (youngest) down to the base
   let y = top, cum = total;
-  const order = beds.map((b, i) => i).reverse();
   // unit columns: merge consecutive beds with the same value; time units get their chart colour
   const unitCol = (label, valueOf, colourOf, x, w) => {
     let yy = top, k = 0, out = '';
@@ -353,14 +411,13 @@ export function logSvg(st) {
     // scale tick at top of bed (height above base)
     s += `<line x1="${colX - 14}" y1="${y}" x2="${colX - 10}" y2="${y}" stroke="#000"/><text x="${colX - 16}" y="${y + 4}" font-size="9" text-anchor="end">${(Math.round(cum * 100) / 100)}</text>`;
     cum -= Number(b.thickness) || 0;
-    // description
-    const desc = [`${i + 1}. ${b.lithology || ''}${b.thickness ? ' (' + b.thickness + ' m)' : ''}`, [stripCode(b.color), b.grain, b.structures, b.fossils].map(t => String(t || '').trim()).filter(Boolean).join(', '), b.description, b.sample ? 'Sample: ' + b.sample : '']
-      .filter(Boolean).flatMap((t, k) => wrapText(t, 46).map(line => ({ line, bold: k === 0 })));
-    const maxLines = Math.max(1, Math.floor(h / 11));
-    desc.slice(0, Math.max(maxLines, 1)).forEach((d, k) => {
-      s += `<text x="${textX}" y="${y + 10 + k * 11}" font-size="9.5" ${d.bold ? 'font-weight="bold"' : ''}>${esc2(d.line)}</text>`;
+    // description: the name line in normal weight, details a little lighter
+    const { y0, lines } = descBlocks[i];
+    lines.forEach((d, k) => {
+      s += `<text x="${textX}" y="${y0 + k * LH}" font-size="10" fill="${d.first ? '#000' : '#333'}">${esc2(d.line)}</text>`;
     });
     s += `<line x1="${colX + w}" y1="${y}" x2="${textX - 4}" y2="${y}" stroke="#ccc" stroke-dasharray="2 2"/>`;
+    if (y0 > y + 11) s += `<line x1="${textX - 4}" y1="${y}" x2="${textX - 1}" y2="${y0 - 8}" stroke="#bbb" stroke-width=".7"/>`;
     y += h;
   }
   s += `<line x1="${colX - 14}" y1="${y}" x2="${colX - 10}" y2="${y}" stroke="#000"/><text x="${colX - 16}" y="${y + 4}" font-size="9" text-anchor="end">0</text>`;
@@ -390,8 +447,7 @@ export function logSvg(st) {
       if (kind === 'lith') {
         s += `<rect x="${x}" y="${yy}" width="28" height="16" fill="${name.fill}"/>
           <rect x="${x}" y="${yy}" width="28" height="16" fill="url(#${name.pat}${isDark(name.fill) ? '-l' : ''})" stroke="#000" stroke-width=".8"/>`;
-        s += `<text x="${x + 36}" y="${yy + (name.colourName ? 8 : 12)}" font-size="10">${esc2(name.name)}</text>`;
-        if (name.colourName) s += `<text x="${x + 36}" y="${yy + 18}" font-size="8" fill="#666">${esc2(name.colourName)}</text>`;
+        s += `<text x="${x + 36}" y="${yy + 12}" font-size="10">${esc2(name.name)}</text>`;
         return;
       } else if (name === 'Gradational') {
         s += `<line x1="${x}" y1="${yy + 8}" x2="${x + 28}" y2="${yy + 8}" stroke="#000" stroke-dasharray="4 3"/>`;
@@ -478,12 +534,12 @@ function editBed(st, index) {
     </div>
     <div class="grid2">
       <div class="field"><label>Thickness (m)</label><input type="number" inputmode="decimal" step="any" id="bd-th" value="${esc(b.thickness)}"></div>
-      <div class="field"><label>Base contact</label><select id="bd-contact">${opts(CONTACTS, b.contact)}</select></div>
+      <div class="field"><label>Base contact</label>${visualFieldHtml('contact', 'bd-contact', b.contact)}</div>
     </div>
-    <div class="field"><label>Lithology</label>${lithFieldHtml(b.lithology)}</div>
+    <div class="field"><label>Lithology</label>${visualFieldHtml('lith', 'bd-lith', b.lithology)}</div>
     <div class="grid2">
       <div class="field"><label>Grain size</label><select id="bd-grain">${opts(GRAINS, b.grain)}</select></div>
-      <div class="field"><label>Shape in log</label><select id="bd-shape">${BED_SHAPES.map(o => `<option ${o === (b.shape || 'Straight') ? 'selected' : ''}>${o}</option>`).join('')}</select></div>
+      <div class="field"><label>Shape in log</label>${visualFieldHtml('shape', 'bd-shape', b.shape)}</div>
     </div>
     <div class="field"><label>Colour</label>${colourFieldHtml('bd-color', b.color, 'id')}</div>
     <div class="field"><label>Sedimentary structures</label><input type="text" id="bd-struct" value="${esc(b.structures)}" placeholder="e.g. Trough cross-bedding"></div>
@@ -493,8 +549,8 @@ function editBed(st, index) {
     <div class="btns"><button class="btn primary" id="bd-save">Save</button>
       ${index != null ? '<button class="btn" id="bd-up">Move up</button><button class="btn" id="bd-down">Move down</button><button class="btn danger" id="bd-del">Delete</button>' : ''}</div>`);
   const v = id => body.querySelector(id).value;
-  bindColourField(body.querySelector('.colour-field:not(.lith-field)'));
-  bindLithField(body.querySelector('.lith-field'));
+  bindColourField(body.querySelector('.colour-field:not(.visual-field)'));
+  body.querySelectorAll('.visual-field').forEach(bindVisualField);
   body.querySelector('#bd-fm').onchange = e => { b.member = ''; body.querySelector('#bd-mbr').innerHTML = memberOpts(e.target.value); };
   body.querySelector('#bd-save').onclick = async () => {
     const th = Number(v('#bd-th'));
