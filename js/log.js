@@ -3,7 +3,7 @@ import { state, saveStation, getStation } from './state.js';
 import { uid } from './db.js';
 import { $, esc, openModal, closeModal, toast, confirmBox, saveFile } from './ui.js';
 import { LITHOLOGIES } from './schema.js';
-import { FORMATION_NAMES, findFormation, CHART_LITHOLOGIES } from './strat.js';
+import { FORMATION_NAMES, findFormation, CHART_LITHOLOGIES, chronoColour } from './strat.js';
 import { colourFieldHtml, bindColourField, colourHex } from './colours.js';
 
 export const GRAINS = ['Clay', 'Silt', 'Very fine sand', 'Fine sand', 'Medium sand', 'Coarse sand', 'Very coarse sand', 'Granule', 'Pebble', 'Cobble', 'Boulder'];
@@ -88,13 +88,64 @@ function wrapText(text, maxChars) {
   return lines;
 }
 
+// Outline of a bed. x0 = left edge, x1 = right edge (grain size), y/h = top and height.
+export const BED_SHAPES = ['Straight', 'Rounded (resistant)', 'Recessive (soft)', 'Lens', 'Wavy'];
+function bedPath(shape, x0, x1, y, h) {
+  const b = y + h, k = Math.min(10, (x1 - x0) * 0.18, h * 0.6);
+  switch (shape) {
+    case 'Rounded (resistant)':
+      return `M${x0} ${y}H${x1 - k}C${x1 + k * 0.6} ${y} ${x1 + k * 0.6} ${b} ${x1 - k} ${b}H${x0}Z`;
+    case 'Recessive (soft)':
+      return `M${x0} ${y}H${x1}Q${x1 - 2 * k} ${y + h / 2} ${x1} ${b}H${x0}Z`;
+    case 'Lens': {
+      const m = y + h / 2;
+      const t = Math.min(h * 0.35, 8); // left side keeps most of its height, right side pinches out
+      return `M${x0} ${y + t}Q${x0} ${y} ${x0 + t} ${y}H${x1 - (x1 - x0) * 0.35}C${x1} ${y} ${x1} ${m} ${x1} ${m}C${x1} ${m} ${x1} ${b} ${x1 - (x1 - x0) * 0.35} ${b}H${x0 + t}Q${x0} ${b} ${x0} ${b - t}Z`;
+    }
+    case 'Wavy': {
+      const n = Math.max(2, Math.round(h / 12)), step = h / n;
+      let d = `M${x0} ${y}H${x1}`;
+      for (let i = 0; i < n; i++) d += `q${i % 2 ? -5 : 5} ${step / 2} 0 ${step}`;
+      return d + `H${x0}Z`;
+    }
+    default: return `M${x0} ${y}H${x1}V${b}H${x0}Z`;
+  }
+}
+
+// Era / period / epoch of a bed: from its formation, else from the station.
+function chronoOf(bed, st) {
+  const fm = findFormation(bed.formation || st.attrs.formation);
+  return {
+    era: (fm && fm.era) || st.attrs.era || '',
+    period: (fm && fm.period) || st.attrs.period || '',
+    epoch: (fm && fm.epoch) || st.attrs.epoch || '',
+  };
+}
+
 export function logSvg(st) {
   const beds = (st.log && st.log.beds) || [];
   const total = beds.reduce((s, b) => s + (Number(b.thickness) || 0), 0) || 1;
   const pxPerM = Math.max(8, Math.min(200, 600 / total));
-  const colX = 92, minW = 30, stepW = 13, textX = colX + minW + stepW * 10 + 20, W = textX + 280;
+  const chrono = beds.map(b => chronoOf(b, st));
+  const hasChrono = chrono.some(c => c.era || c.period || c.epoch);
+  const hasUnits = beds.some(b => b.formation || b.member);
+  // left-hand columns: Era | Period | Epoch | Fm | Mbr, 17 px each
+  const cols = [
+    ...(hasChrono ? [['Era', i => chrono[i].era, true], ['Period', i => chrono[i].period, true], ['Epoch', i => chrono[i].epoch, true]] : []),
+    ...(hasUnits ? [['Fm', i => beds[i].formation || '', false], ['Mbr', i => beds[i].member || '', false]] : []),
+  ];
+  const colX = 2 + cols.length * 17 + 52, minW = 30, stepW = 13, textX = colX + minW + stepW * 10 + 20, W = textX + 280;
   const heights = beds.map(b => Math.max(10, (Number(b.thickness) || 0) * pxPerM));
-  const top = 50, H = top + heights.reduce((a, b) => a + b, 0) + 60;
+  const top = 50;
+  const colBottom = top + heights.reduce((a, b) => a + b, 0);
+
+  // legend entries: lithologies and contacts used in this log
+  const liths = [...new Set(beds.map(b => b.lithology).filter(Boolean))];
+  const contacts = [...new Set(beds.map(b => b.contact).filter(c => ['Erosional', 'Unconformity', 'Gradational', 'Faulted'].includes(c)))];
+  const legendItems = liths.length + contacts.length;
+  const legendTop = colBottom + 50, legendRows = Math.ceil(legendItems / 2);
+  const H = legendItems ? legendTop + 24 + legendRows * 22 + 10 : colBottom + 60;
+
   const esc2 = s => esc(s);
   let s = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" font-family="Helvetica, Arial, sans-serif">${DEFS}
     <rect width="${W}" height="${H}" fill="#fff"/>
@@ -104,30 +155,30 @@ export function logSvg(st) {
   // beds drawn from the top of the page (youngest) down to the base
   let y = top, cum = total;
   const order = beds.map((b, i) => i).reverse();
-  // formation / member columns: merge consecutive beds with the same unit
-  const unitCol = (key, x, w) => {
-    let yy = top, k = 0, out = '';
+  // unit columns: merge consecutive beds with the same value; time units get their chart colour
+  const unitCol = (label, valueOf, coloured, x, w) => {
+    let yy = top, k = 0, out = `<text x="${x + w / 2}" y="${top - 6}" font-size="7.5" fill="#555" text-anchor="middle">${label}</text>`;
     while (k < order.length) {
-      const name = beds[order[k]][key] || '';
+      const name = valueOf(order[k]);
       let hh = 0;
-      while (k < order.length && (beds[order[k]][key] || '') === name) { hh += heights[order[k]]; k++; }
-      out += `<rect x="${x}" y="${yy}" width="${w}" height="${hh}" fill="none" stroke="#000" stroke-width=".6"/>`;
-      if (name) out += `<text transform="translate(${x + w / 2 + 3.5},${yy + hh / 2}) rotate(-90)" font-size="9.5" text-anchor="middle">${esc2(hh > name.length * 5.5 ? name : name.slice(0, Math.max(1, Math.floor(hh / 5.5))))}</text>`;
+      while (k < order.length && valueOf(order[k]) === name) { hh += heights[order[k]]; k++; }
+      const fill = coloured ? (chronoColour(name) || '#fff') : 'none';
+      out += `<rect x="${x}" y="${yy}" width="${w}" height="${hh}" fill="${fill}" stroke="#000" stroke-width=".6"/>`;
+      if (name) out += `<text transform="translate(${x + w / 2 + 3.5},${yy + hh / 2}) rotate(-90)" font-size="9" text-anchor="middle">${esc2(hh > name.length * 5.2 ? name : name.slice(0, Math.max(1, Math.floor(hh / 5.2))))}</text>`;
       yy += hh;
     }
     return out;
   };
-  if (beds.some(b => b.formation || b.member)) {
-    s += `<text x="2" y="${top - 6}" font-size="8" fill="#555">Fm</text><text x="20" y="${top - 6}" font-size="8" fill="#555">Mbr</text>`;
-    s += unitCol('formation', 2, 16) + unitCol('member', 20, 16);
-  }
+  cols.forEach(([label, valueOf, coloured], c) => { s += unitCol(label, valueOf, coloured, 2 + c * 17, 16); });
+
   for (const i of order) {
     const b = beds[i], h = heights[i];
     const w = minW + stepW * grainIndex(b);
     const pat = patternFor(b.lithology);
     const fill = colourHex(b.color) || DEFAULT_FILL[pat];
-    s += `<rect x="${colX}" y="${y}" width="${w}" height="${h}" fill="${fill}"/>`;
-    s += `<rect x="${colX}" y="${y}" width="${w}" height="${h}" fill="url(#${pat}${isDark(fill) ? '-l' : ''})" stroke="#000" stroke-width="1"/>`;
+    const d = bedPath(b.shape, colX, colX + w, y, h);
+    s += `<path d="${d}" fill="${fill}"/>`;
+    s += `<path d="${d}" fill="url(#${pat}${isDark(fill) ? '-l' : ''})" stroke="#000" stroke-width="1"/>`;
     // base contact
     const by = y + h;
     if (b.contact === 'Erosional' || b.contact === 'Unconformity') {
@@ -159,6 +210,30 @@ export function logSvg(st) {
     s += `<line x1="${x}" y1="${y}" x2="${x}" y2="${y + 5}" stroke="#000"/><text x="${x}" y="${y + 15}" font-size="8" text-anchor="middle">${a}</text>`;
   });
   s += `<text x="${colX}" y="${y + 30}" font-size="9" fill="#555">Grain size · scale 1 m = ${pxPerM.toFixed(0)} px</text>`;
+
+  // legend
+  if (legendItems) {
+    s += `<line x1="10" y1="${legendTop - 8}" x2="${W - 10}" y2="${legendTop - 8}" stroke="#ccc"/>
+      <text x="10" y="${legendTop + 8}" font-size="11" font-weight="bold">Legend</text>`;
+    const items = [...liths.map(l => ['lith', l]), ...contacts.map(c => ['contact', c])];
+    const colW = Math.min((W - 20) / 2, 175);
+    items.forEach(([kind, name], n) => {
+      const x = 10 + (n % 2) * colW, yy = legendTop + 20 + Math.floor(n / 2) * 22;
+      if (kind === 'lith') {
+        const pat = patternFor(name);
+        s += `<rect x="${x}" y="${yy}" width="28" height="16" fill="${DEFAULT_FILL[pat]}"/>
+          <rect x="${x}" y="${yy}" width="28" height="16" fill="url(#${pat}${isDark(DEFAULT_FILL[pat]) ? '-l' : ''})" stroke="#000" stroke-width=".8"/>`;
+      } else if (name === 'Gradational') {
+        s += `<line x1="${x}" y1="${yy + 8}" x2="${x + 28}" y2="${yy + 8}" stroke="#000" stroke-dasharray="4 3"/>`;
+      } else if (name === 'Faulted') {
+        s += `<line x1="${x}" y1="${yy + 11}" x2="${x + 28}" y2="${yy + 5}" stroke="#d00" stroke-width="2"/>`;
+      } else {
+        let dd = `M${x} ${yy + 8}`; for (let k = 0; k < 28; k += 8) dd += ' q2 -4 4 0 q2 4 4 0';
+        s += `<path d="${dd}" fill="none" stroke="#000" stroke-width="${name === 'Unconformity' ? 2 : 1.4}"/>`;
+      }
+      s += `<text x="${x + 36}" y="${yy + 12}" font-size="10">${esc2(kind === 'contact' ? name + ' contact' : name)}</text>`;
+    });
+  }
   return s + '</svg>';
 }
 
@@ -236,7 +311,10 @@ function editBed(st, index) {
       <div class="field"><label>Base contact</label><select id="bd-contact">${opts(CONTACTS, b.contact)}</select></div>
     </div>
     <div class="field"><label>Lithology</label><select id="bd-lith">${opts(LOG_LITHS, b.lithology)}</select></div>
-    <div class="field"><label>Grain size</label><select id="bd-grain">${opts(GRAINS, b.grain)}</select></div>
+    <div class="grid2">
+      <div class="field"><label>Grain size</label><select id="bd-grain">${opts(GRAINS, b.grain)}</select></div>
+      <div class="field"><label>Shape in log</label><select id="bd-shape">${BED_SHAPES.map(o => `<option ${o === (b.shape || 'Straight') ? 'selected' : ''}>${o}</option>`).join('')}</select></div>
+    </div>
     <div class="field"><label>Colour</label>${colourFieldHtml('bd-color', b.color, 'id')}</div>
     <div class="field"><label>Sedimentary structures</label><input type="text" id="bd-struct" value="${esc(b.structures)}" placeholder="e.g. Trough cross-bedding"></div>
     <div class="field"><label>Fossils</label><input type="text" id="bd-fossils" value="${esc(b.fossils)}"></div>
@@ -250,7 +328,7 @@ function editBed(st, index) {
   body.querySelector('#bd-save').onclick = async () => {
     const th = Number(v('#bd-th'));
     if (!th || th <= 0) { toast('Enter a thickness in metres'); return; }
-    Object.assign(b, { thickness: th, formation: v('#bd-fm'), member: v('#bd-mbr'), contact: v('#bd-contact'), lithology: v('#bd-lith'), grain: v('#bd-grain'), color: v('#bd-color'),
+    Object.assign(b, { thickness: th, formation: v('#bd-fm'), member: v('#bd-mbr'), contact: v('#bd-contact'), lithology: v('#bd-lith'), grain: v('#bd-grain'), shape: v('#bd-shape'), color: v('#bd-color'),
       structures: v('#bd-struct'), fossils: v('#bd-fossils'), description: v('#bd-desc'), sample: v('#bd-sample') });
     if (index == null) beds.push(b); else beds[index] = b;
     await saveStation(st); closeModal(); renderLog();

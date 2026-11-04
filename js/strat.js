@@ -59,6 +59,36 @@ export function findFormation(name) {
 // Fields filled from the formation choice: schema key -> formation property
 export const FORMATION_FILLS = { era: 'era', period: 'period', epoch: 'epoch', age: 'age' };
 
+// International chronostratigraphic colours (ICS / CGMW), as used on stratigraphic charts.
+const CHRONO_COLOURS = {
+  // eras
+  Cenozoic: '#F2F91D', Mesozoic: '#67C5CA', Paleozoic: '#99C08D', Neoproterozoic: '#FEB342', Proterozoic: '#F73563', Precambrian: '#F74370',
+  // periods
+  Quaternary: '#F9F97F', Neogene: '#FFE619', Paleogene: '#FD9A52', Cretaceous: '#7FC64E', Jurassic: '#34B2C9', Triassic: '#812B92',
+  Permian: '#F04028', Carboniferous: '#67A599', Devonian: '#CB8C37', Silurian: '#B3E1B6', Ordovician: '#009270', Cambrian: '#7FA056',
+  Ediacaran: '#FED96A', Cryogenian: '#FECC5C', Tonian: '#FEBF4E',
+  // epochs
+  Holocene: '#FEF2E0', Pleistocene: '#FFF2AE', Pliocene: '#FFFF99', Miocene: '#FFFF00', Oligocene: '#FEC07A', Eocene: '#FDB46C', Paleocene: '#FDA75F',
+  'Late Cretaceous': '#A6D84A', 'Early Cretaceous': '#8CCD57', 'Late Jurassic': '#B3E3EE', 'Middle Jurassic': '#80CFD8', 'Early Jurassic': '#42AED0',
+  'Late Triassic': '#BD8CC3', 'Middle Triassic': '#B168B1', 'Early Triassic': '#983999', Lopingian: '#FBA794', Guadalupian: '#FB745C', Cisuralian: '#EF5845',
+  Pennsylvanian: '#99C2B5', Mississippian: '#678F66', 'Late Devonian': '#F1E19D', 'Middle Devonian': '#F1C868', 'Early Devonian': '#E5AC4D',
+  Pridoli: '#E6F5E1', Ludlow: '#BFE6CF', Wenlock: '#B3E1C2', Llandovery: '#99D7B3', 'Late Ordovician': '#7FCA93', 'Middle Ordovician': '#4DB47E',
+  'Early Ordovician': '#1A9D6F', Furongian: '#B3E095', 'Late Cambrian': '#B3E095', 'Middle Cambrian': '#A6CF86', 'Early Cambrian': '#8CB06C',
+};
+const CHRONO_KEYS = Object.keys(CHRONO_COLOURS).sort((a, b) => b.length - a.length);
+
+// Colour for a time name such as "Paleogene", "Early Cretaceous" or "Permian–Triassic" (older part wins).
+export function chronoColour(name) {
+  if (!name) return null;
+  const first = String(name).split(/[–-]/)[0].trim();
+  for (const text of [first, String(name)]) {
+    if (CHRONO_COLOURS[text]) return CHRONO_COLOURS[text];
+    const k = CHRONO_KEYS.find(key => text.toLowerCase().includes(key.toLowerCase()));
+    if (k) return CHRONO_COLOURS[k];
+  }
+  return null;
+}
+
 // Lithology key of the chart, used in the log.
 export const CHART_LITHOLOGIES = [
   'Limestone', 'Dolomitic limestone', 'Argillaceous limestone', 'Calcarenitic limestone', 'Calcarenite', 'Wackestone',
