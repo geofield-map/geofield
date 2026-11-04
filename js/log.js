@@ -1,7 +1,7 @@
 // Stratigraphic log for a station: beds from base to top, drawn as a graphic column.
 import { state, saveStation, getStation } from './state.js';
 import { db, uid } from './db.js';
-import { $, esc, openModal, closeModal, toast, confirmBox, saveFile } from './ui.js';
+import { $, esc, openModal, closeModal, toast, confirmBox, saveFile, resetViewport } from './ui.js';
 import { LITHOLOGIES } from './schema.js';
 import { FORMATION_NAMES, findFormation, CHART_LITHOLOGIES, chronoColour, formationColour } from './strat.js';
 import { colourFieldHtml, bindColourField, colourHex } from './colours.js';
@@ -129,7 +129,8 @@ export async function pickLithology(current) {
     document.body.appendChild(lithOverlay);
   }
   const chip = name => `<button class="cp-chip" data-v="${esc(name)}"><span class="lp-sw">${lithSwatch(name)}</span><span class="cp-txt"><span>${esc(name)}</span></span></button>`;
-  lithOverlay.innerHTML = `<svg width="0" height="0" style="position:absolute">${DEFS}</svg><div class="cp-card">
+  ensureDefs();
+  lithOverlay.innerHTML = `<div class="cp-card">
     <div class="cp-head"><b>Choose lithology</b><button class="icon-btn" data-act="close">&times;</button></div>
     <div class="cp-tools"><input type="search" placeholder="Search: limestone, sand, dolomite…" class="cp-search">
       <div class="btns" style="margin:8px 0 0"><button class="btn small" data-act="custom">Type my own</button><button class="btn small danger" data-act="clear">Clear</button></div></div>
@@ -139,7 +140,7 @@ export async function pickLithology(current) {
     </div></div>`;
   lithOverlay.classList.remove('hidden');
   return new Promise(resolve => {
-    const done = v => { lithOverlay.classList.add('hidden'); lithOverlay.onclick = null; if (v) rememberLith(v); resolve(v); };
+    const done = v => { lithOverlay.classList.add('hidden'); lithOverlay.onclick = null; resetViewport(); if (v) rememberLith(v); resolve(v); };
     lithOverlay.onclick = e => {
       if (e.target === lithOverlay) return done(undefined);
       const btn = e.target.closest('button');
@@ -161,9 +162,20 @@ export async function pickLithology(current) {
   });
 }
 
+// Pattern definitions live once in the page, so swatches anywhere (field, picker) can use them.
+function ensureDefs() {
+  if (document.getElementById('gf-defs')) return;
+  const holder = document.createElement('div');
+  holder.innerHTML = `<svg id="gf-defs" width="0" height="0" style="position:absolute;width:0;height:0;overflow:hidden" aria-hidden="true">${DEFS}</svg>`;
+  document.body.appendChild(holder.firstElementChild);
+}
+
+// A button, not a text box: nothing takes keyboard focus (see resetViewport in ui.js).
 function lithFieldHtml(value) {
-  return `<div class="colour-field lith-field"><span class="lp-sw small">${value ? lithSwatch(value, 30, 24) : ''}</span>
-    <input type="text" readonly id="bd-lith" value="${esc(value || '')}" placeholder="Tap to choose a lithology"></div>`;
+  ensureDefs();
+  return `<button type="button" class="colour-field lith-field"><span class="lp-sw small">${value ? lithSwatch(value, 30, 24) : ''}</span>
+    <span class="cf-text ${value ? '' : 'placeholder'}">${esc(value || 'Tap to choose a lithology')}</span>
+    <input type="hidden" id="bd-lith" value="${esc(value || '')}"></button>`;
 }
 function bindLithField(wrapper) {
   const input = wrapper.querySelector('input');
@@ -171,6 +183,9 @@ function bindLithField(wrapper) {
     const v = await pickLithology(input.value);
     if (v === undefined) return;
     input.value = v;
+    const text = wrapper.querySelector('.cf-text');
+    text.textContent = v || 'Tap to choose a lithology';
+    text.classList.toggle('placeholder', !v);
     wrapper.querySelector('.lp-sw').innerHTML = v ? lithSwatch(v, 30, 24) : '';
   });
 }

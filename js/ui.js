@@ -16,8 +16,23 @@ export function toast(msg, ms = 2200) {
   toastTimer = setTimeout(() => t.classList.add('hidden'), ms);
 }
 
+// iPhone: after a text box inside a fixed pop-up is focused, Safari can leave the page shifted, so taps
+// land on the wrong field. Drop focus and scroll back to the top whenever a box is left or a pop-up closes.
+export function resetViewport() {
+  const el = document.activeElement;
+  if (el && el !== document.body && typeof el.blur === 'function') el.blur();
+  window.scrollTo(0, 0);
+}
+document.addEventListener('focusout', () => {
+  setTimeout(() => {
+    const el = document.activeElement;
+    if (!el || !['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName)) window.scrollTo(0, 0);
+  }, 60);
+});
+
 let modalOnClose = null;
 export function openModal(title, html, onClose) {
+  resetViewport();
   $('#modal-title').textContent = title;
   $('#modal-body').innerHTML = html;
   $('#modal').classList.remove('hidden');
@@ -25,6 +40,7 @@ export function openModal(title, html, onClose) {
   return $('#modal-body');
 }
 export function closeModal() {
+  resetViewport();
   $('#modal').classList.add('hidden');
   $('#modal-body').innerHTML = '';
   const cb = modalOnClose; modalOnClose = null;

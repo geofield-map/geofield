@@ -1,6 +1,6 @@
 // Rock colour picker: GSA Rock-Color Chart names with Munsell codes, drawn as swatches.
 import { db } from './db.js';
-import { esc } from './ui.js';
+import { esc, resetViewport } from './ui.js';
 
 // [Munsell code, name], grouped by colour family.
 export const COLOUR_GROUPS = [
@@ -126,14 +126,14 @@ export async function pickColour(current) {
 
   return new Promise(resolve => {
     let mottledFirst = null;
-    const done = v => { overlay.classList.add('hidden'); overlay.onclick = null; if (v) remember(v); resolve(v); };
+    const done = v => { overlay.classList.add('hidden'); overlay.onclick = null; resetViewport(); if (v) remember(v); resolve(v); };
     overlay.onclick = e => {
       if (e.target === overlay) return done(undefined);
       const btn = e.target.closest('button');
       if (!btn) return;
       const act = btn.dataset.act;
       if (act === 'close') return done(undefined);
-      if (act === 'clear') { overlay.classList.add('hidden'); resolve(''); return; }
+      if (act === 'clear') return done('');
       if (act === 'custom') { const v = window.prompt('Colour', current || ''); if (v != null) done(v.trim()); return; }
       if (act === 'mottled') {
         mottledFirst = '';
@@ -166,20 +166,25 @@ export async function pickColour(current) {
   });
 }
 
-// Field markup: a tappable box showing the swatch and the colour name.
+// Field markup: a button showing the swatch and the colour name. The value sits in a hidden input,
+// so no text box ever takes focus (on iPhone a focused box inside a pop-up shifts where taps land).
 export function colourFieldHtml(key, value, attr = 'data-key') {
   const hex = colourHex(value);
-  return `<div class="colour-field"><span class="cf-sw" style="background:${hex || 'transparent'};${hex ? '' : 'border-style:dashed'}"></span>
-    <input type="text" readonly ${attr}="${esc(key)}" value="${esc(value || '')}" placeholder="Tap to choose a colour"></div>`;
+  return `<button type="button" class="colour-field"><span class="cf-sw" style="background:${hex || 'transparent'};${hex ? '' : 'border-style:dashed'}"></span>
+    <span class="cf-text ${value ? '' : 'placeholder'}">${esc(value || 'Tap to choose a colour')}</span>
+    <input type="hidden" ${attr}="${esc(key)}" value="${esc(value || '')}"></button>`;
 }
 
-// Make a colour-field open the picker; fires 'input' on the inner input after a choice.
+// Make a colour-field open the picker; fires 'input' on the hidden input after a choice.
 export function bindColourField(wrapper) {
   const input = wrapper.querySelector('input');
   wrapper.addEventListener('click', async () => {
     const v = await pickColour(input.value);
     if (v === undefined) return;
     input.value = v;
+    const text = wrapper.querySelector('.cf-text');
+    text.textContent = v || 'Tap to choose a colour';
+    text.classList.toggle('placeholder', !v);
     const hex = colourHex(v);
     const sw = wrapper.querySelector('.cf-sw');
     sw.style.background = hex || 'transparent';
