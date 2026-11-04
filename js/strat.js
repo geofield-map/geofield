@@ -59,22 +59,38 @@ export function findFormation(name) {
 // Fields filled from the formation choice: schema key -> formation property
 export const FORMATION_FILLS = { era: 'era', period: 'period', epoch: 'epoch', age: 'age' };
 
-// International chronostratigraphic colours (ICS / CGMW), as used on stratigraphic charts.
+// Time-scale colours taken from the Generalized Stratigraphy of Eastern Saudi Arabia chart.
 const CHRONO_COLOURS = {
   // eras
-  Cenozoic: '#F2F91D', Mesozoic: '#67C5CA', Paleozoic: '#99C08D', Neoproterozoic: '#FEB342', Proterozoic: '#F73563', Precambrian: '#F74370',
+  Cenozoic: '#FFF4B5', Mesozoic: '#4DCEE1', Paleozoic: '#9ED6BB', Neoproterozoic: '#FFC16B', Precambrian: '#FFC16B',
   // periods
-  Quaternary: '#F9F97F', Neogene: '#FFE619', Paleogene: '#FD9A52', Cretaceous: '#7FC64E', Jurassic: '#34B2C9', Triassic: '#812B92',
-  Permian: '#F04028', Carboniferous: '#67A599', Devonian: '#CB8C37', Silurian: '#B3E1B6', Ordovician: '#009270', Cambrian: '#7FA056',
-  Ediacaran: '#FED96A', Cryogenian: '#FECC5C', Tonian: '#FEBF4E',
+  Quaternary: '#FFF4A5', Neogene: '#FFEA67', Paleogene: '#FFBA8C', Cretaceous: '#86D08A', Jurassic: '#4FD0EA', Triassic: '#9767B4',
+  Permian: '#FF7F69', Carboniferous: '#66C6C1', Devonian: '#E7B673', Silurian: '#B7E2D4', Ordovician: '#21BB9F', Cambrian: '#8FC894',
+  Ediacaran: '#FFD885', Cryogenian: '#FFCE78', Tonian: '#FFCE78',
   // epochs
-  Holocene: '#FEF2E0', Pleistocene: '#FFF2AE', Pliocene: '#FFFF99', Miocene: '#FFFF00', Oligocene: '#FEC07A', Eocene: '#FDB46C', Paleocene: '#FDA75F',
-  'Late Cretaceous': '#A6D84A', 'Early Cretaceous': '#8CCD57', 'Late Jurassic': '#B3E3EE', 'Middle Jurassic': '#80CFD8', 'Early Jurassic': '#42AED0',
-  'Late Triassic': '#BD8CC3', 'Middle Triassic': '#B168B1', 'Early Triassic': '#983999', Lopingian: '#FBA794', Guadalupian: '#FB745C', Cisuralian: '#EF5845',
-  Pennsylvanian: '#99C2B5', Mississippian: '#678F66', 'Late Devonian': '#F1E19D', 'Middle Devonian': '#F1C868', 'Early Devonian': '#E5AC4D',
-  Pridoli: '#E6F5E1', Ludlow: '#BFE6CF', Wenlock: '#B3E1C2', Llandovery: '#99D7B3', 'Late Ordovician': '#7FCA93', 'Middle Ordovician': '#4DB47E',
-  'Early Ordovician': '#1A9D6F', Furongian: '#B3E095', 'Late Cambrian': '#B3E095', 'Middle Cambrian': '#A6CF86', 'Early Cambrian': '#8CB06C',
+  Holocene: '#FFF4B4', Pleistocene: '#FFF4B4', Pliocene: '#FFF4B4', Miocene: '#FFEF86', Oligocene: '#FFE4C8', Eocene: '#FFCA9F', Paleocene: '#FFC394',
+  'Late Cretaceous': '#B3DA86', 'Early Cretaceous': '#93D491', 'Late Jurassic': '#ADE8F4', 'Middle Jurassic': '#92E1F0', 'Early Jurassic': '#73D9EC',
+  'Late Triassic': '#C7B4D9', 'Middle Triassic': '#BF99CC', 'Early Triassic': '#A973B9', Lopingian: '#FFCCC2', Guadalupian: '#FFA696', Cisuralian: '#FF9281',
+  Pennsylvanian: '#99D5D5', Mississippian: '#85D2CF', 'Late Devonian': '#F7E6C1', 'Middle Devonian': '#FFD79C', 'Early Devonian': '#F5C886',
+  Pridoli: '#DDF2EC', Ludlow: '#DDF2EC', Wenlock: '#D2EDE6', Llandovery: '#C7E8DE', 'Late Ordovician': '#8EDBCE', 'Middle Ordovician': '#6FD2C2',
+  'Early Ordovician': '#4BC7B2', Furongian: '#B7E3C1', 'Late Cambrian': '#B7E3C1', Miaolingian: '#ADDDB7', 'Middle Cambrian': '#ADDDB7', 'Early Cambrian': '#95D0A6',
 };
+
+// Formation colours from the same chart. Members use their formation's colour.
+const FORMATION_COLOURS = {
+  Hofuf: '#FFEA96', Dam: '#FFE682', Hadrukh: '#FFE15F', Dammam: '#FFC09C', Rus: '#FFB593', 'Umm Er Radhuma': '#FFC68A',
+  Aruma: '#F4EEAE', Wasia: '#CFE08E', "Shu'aiba": '#C9E3AF', Biyadh: '#B8DDA8', Buwaib: '#ABD9A1', Yamama: '#93D091',
+  Sulaiy: '#91D08E', Hith: '#D2EDE3', Arab: '#C4E7F6', Jubaila: '#C6EDF5', Hanifa: '#B6EAF5', 'Tuwaiq Mountain': '#B2E9F4',
+  Dhruma: '#A3E5F2', Marrat: '#7FDAF7', Minjur: '#B6ACD4', Jilh: '#A78EC6', Sudair: '#8F66B4', Khuff: '#FED3CA',
+  Nuayyim: '#F6AA9E', Unayzah: '#F6968C', Juwayl: '#E79083', Berwath: '#86C390', Jubah: '#F0EFD5', Jauf: '#F9D590',
+  Tawil: '#EAD896', Qalibah: '#80D1BE', Sarah: '#AED4BC', Qasim: '#4CC6AD', Saq: '#E0EED5', Burj: '#B0D1AC', Siq: '#95C798',
+  'Undefined (Ediacaran)': '#FFD5A0', Basement: '#FF9779',
+};
+
+export function formationColour(name) {
+  const fm = findFormation(name);
+  return fm ? FORMATION_COLOURS[fm.name] || null : null;
+}
 const CHRONO_KEYS = Object.keys(CHRONO_COLOURS).sort((a, b) => b.length - a.length);
 
 // Colour for a time name such as "Paleogene", "Early Cretaceous" or "Permian–Triassic" (older part wins).

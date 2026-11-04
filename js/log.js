@@ -3,7 +3,7 @@ import { state, saveStation, getStation } from './state.js';
 import { uid } from './db.js';
 import { $, esc, openModal, closeModal, toast, confirmBox, saveFile } from './ui.js';
 import { LITHOLOGIES } from './schema.js';
-import { FORMATION_NAMES, findFormation, CHART_LITHOLOGIES, chronoColour } from './strat.js';
+import { FORMATION_NAMES, findFormation, CHART_LITHOLOGIES, chronoColour, formationColour } from './strat.js';
 import { colourFieldHtml, bindColourField, colourHex } from './colours.js';
 
 export const GRAINS = ['Clay', 'Silt', 'Very fine sand', 'Fine sand', 'Medium sand', 'Coarse sand', 'Very coarse sand', 'Granule', 'Pebble', 'Cobble', 'Boulder'];
@@ -112,13 +112,14 @@ function bedPath(shape, x0, x1, y, h) {
   }
 }
 
-// Era / period / epoch of a bed: from its formation, else from the station.
+// Era / period / epoch / stage of a bed: from its formation, else from the station.
 function chronoOf(bed, st) {
   const fm = findFormation(bed.formation || st.attrs.formation);
   return {
     era: (fm && fm.era) || st.attrs.era || '',
     period: (fm && fm.period) || st.attrs.period || '',
     epoch: (fm && fm.epoch) || st.attrs.epoch || '',
+    age: (fm && fm.age) || st.attrs.age || '',
   };
 }
 
@@ -129,18 +130,30 @@ export function logSvg(st) {
   const chrono = beds.map(b => chronoOf(b, st));
   const hasChrono = chrono.some(c => c.era || c.period || c.epoch);
   const hasUnits = beds.some(b => b.formation || b.member);
-  // left-hand columns: Era | Period | Epoch | Fm | Mbr, 17 px each
+  // left-hand columns, 17 px each. Era, Period, Epoch and Formation take the chart colours; Stage/Age and Member stay white.
+  const white = () => null;
   const cols = [
-    ...(hasChrono ? [['Era', i => chrono[i].era, true], ['Period', i => chrono[i].period, true], ['Epoch', i => chrono[i].epoch, true]] : []),
-    ...(hasUnits ? [['Fm', i => beds[i].formation || '', false], ['Mbr', i => beds[i].member || '', false]] : []),
+    ...(hasChrono ? [['Era', i => chrono[i].era, chronoColour], ['Period', i => chrono[i].period, chronoColour],
+      ['Epoch', i => chrono[i].epoch, chronoColour], ['Stage / Age', i => chrono[i].age, white]] : []),
+    ...(hasUnits ? [['Formation', i => beds[i].formation || '', formationColour],
+      // the key keeps equally named members of different formations apart
+      ['Member', i => beds[i].member ? `${beds[i].member}\u0000${beds[i].formation || ''}` : '', white]] : []),
   ];
-  const colX = 2 + cols.length * 17 + 52, minW = 30, stepW = 13, textX = colX + minW + stepW * 10 + 20, W = textX + 280;
+  const colX = 2 + cols.length * 17 + 40, minW = 30, stepW = 13, textX = colX + minW + stepW * 10 + 20, W = textX + 280;
   const heights = beds.map(b => Math.max(10, (Number(b.thickness) || 0) * pxPerM));
-  const top = 50;
+  const headTop = 30, headH = 62, top = headTop + headH;
   const colBottom = top + heights.reduce((a, b) => a + b, 0);
 
   // legend entries: lithologies and contacts used in this log
-  const liths = [...new Set(beds.map(b => b.lithology).filter(Boolean))];
+  // one entry per lithology + colour, so the swatch matches the beds exactly
+  const liths = [];
+  for (const b of beds.slice().reverse()) {
+    if (!b.lithology) continue;
+    const pat = patternFor(b.lithology), fill = colourHex(b.color) || DEFAULT_FILL[pat];
+    if (liths.some(l => l.name === b.lithology && l.fill === fill)) continue;
+    const colourName = colourHex(b.color) ? String(b.color).replace(/\s*\([^)]*\)\s*$/, '') : '';
+    liths.push({ name: b.lithology, pat, fill, colourName });
+  }
   const contacts = [...new Set(beds.map(b => b.contact).filter(c => ['Erosional', 'Unconformity', 'Gradational', 'Faulted'].includes(c)))];
   const legendItems = liths.length + contacts.length;
   const legendTop = colBottom + 50, legendRows = Math.ceil(legendItems / 2);
@@ -149,27 +162,41 @@ export function logSvg(st) {
   const esc2 = s => esc(s);
   let s = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" font-family="Helvetica, Arial, sans-serif">${DEFS}
     <rect width="${W}" height="${H}" fill="#fff"/>
-    <text x="10" y="20" font-size="14" font-weight="bold">${esc2(st.code)} — Stratigraphic log</text>
-    <text x="10" y="36" font-size="11" fill="#555">${esc2([state.project.name, st.attrs.formation, `E ${Math.round(st.easting)} N ${Math.round(st.northing)}`].filter(Boolean).join(' · '))}</text>`;
+    <text x="10" y="20" font-size="14" font-weight="bold">${esc2(st.code)} — Stratigraphic log</text>`;
+
+  // header row: each column's name inside its own box, like a stratigraphic chart
+  const headBox = (x, w, label, rotate) => {
+    let out = `<rect x="${x}" y="${headTop}" width="${w}" height="${headH}" fill="#f2f2f2" stroke="#000" stroke-width=".8"/>`;
+    out += rotate
+      ? `<text transform="translate(${x + w / 2 + 3.5},${headTop + headH / 2}) rotate(-90)" font-size="8.5" font-weight="bold" text-anchor="middle">${label}</text>`
+      : `<text x="${x + w / 2}" y="${headTop + headH / 2 + 4}" font-size="11" font-weight="bold" text-anchor="middle">${label}</text>`;
+    return out;
+  };
+  cols.forEach(([label], c) => { s += headBox(2 + c * 17, 16, label, true); });
+  const depthX = 2 + cols.length * 17;
+  s += headBox(depthX + 2, colX - depthX - 6, 'm', false);
+  s += headBox(colX - 2, textX - colX - 4, 'Lithology', false);
+  s += headBox(textX - 4, W - textX, 'Description', false);
 
   // beds drawn from the top of the page (youngest) down to the base
   let y = top, cum = total;
   const order = beds.map((b, i) => i).reverse();
   // unit columns: merge consecutive beds with the same value; time units get their chart colour
-  const unitCol = (label, valueOf, coloured, x, w) => {
-    let yy = top, k = 0, out = `<text x="${x + w / 2}" y="${top - 6}" font-size="7.5" fill="#555" text-anchor="middle">${label}</text>`;
+  const unitCol = (label, valueOf, colourOf, x, w) => {
+    let yy = top, k = 0, out = '';
     while (k < order.length) {
-      const name = valueOf(order[k]);
+      const key = valueOf(order[k]);
+      const name = key.split('\u0000')[0];
       let hh = 0;
-      while (k < order.length && valueOf(order[k]) === name) { hh += heights[order[k]]; k++; }
-      const fill = coloured ? (chronoColour(name) || '#fff') : 'none';
+      while (k < order.length && valueOf(order[k]) === key) { hh += heights[order[k]]; k++; }
+      const fill = (key && colourOf(key)) || '#fff';
       out += `<rect x="${x}" y="${yy}" width="${w}" height="${hh}" fill="${fill}" stroke="#000" stroke-width=".6"/>`;
       if (name) out += `<text transform="translate(${x + w / 2 + 3.5},${yy + hh / 2}) rotate(-90)" font-size="9" text-anchor="middle">${esc2(hh > name.length * 5.2 ? name : name.slice(0, Math.max(1, Math.floor(hh / 5.2))))}</text>`;
       yy += hh;
     }
     return out;
   };
-  cols.forEach(([label, valueOf, coloured], c) => { s += unitCol(label, valueOf, coloured, 2 + c * 17, 16); });
+  cols.forEach(([label, valueOf, colourOf], c) => { s += unitCol(label, valueOf, colourOf, 2 + c * 17, 16); });
 
   for (const i of order) {
     const b = beds[i], h = heights[i];
@@ -203,7 +230,6 @@ export function logSvg(st) {
     y += h;
   }
   s += `<line x1="${colX - 14}" y1="${y}" x2="${colX - 10}" y2="${y}" stroke="#000"/><text x="${colX - 16}" y="${y + 4}" font-size="9" text-anchor="end">0</text>`;
-  s += `<text x="${colX - 30}" y="${top - 6}" font-size="9" fill="#555">m</text>`;
   // grain-size scale
   GRAIN_ABBR.forEach((a, i) => {
     const x = colX + minW + stepW * i;
@@ -220,9 +246,11 @@ export function logSvg(st) {
     items.forEach(([kind, name], n) => {
       const x = 10 + (n % 2) * colW, yy = legendTop + 20 + Math.floor(n / 2) * 22;
       if (kind === 'lith') {
-        const pat = patternFor(name);
-        s += `<rect x="${x}" y="${yy}" width="28" height="16" fill="${DEFAULT_FILL[pat]}"/>
-          <rect x="${x}" y="${yy}" width="28" height="16" fill="url(#${pat}${isDark(DEFAULT_FILL[pat]) ? '-l' : ''})" stroke="#000" stroke-width=".8"/>`;
+        s += `<rect x="${x}" y="${yy}" width="28" height="16" fill="${name.fill}"/>
+          <rect x="${x}" y="${yy}" width="28" height="16" fill="url(#${name.pat}${isDark(name.fill) ? '-l' : ''})" stroke="#000" stroke-width=".8"/>`;
+        s += `<text x="${x + 36}" y="${yy + (name.colourName ? 8 : 12)}" font-size="10">${esc2(name.name)}</text>`;
+        if (name.colourName) s += `<text x="${x + 36}" y="${yy + 18}" font-size="8" fill="#666">${esc2(name.colourName)}</text>`;
+        return;
       } else if (name === 'Gradational') {
         s += `<line x1="${x}" y1="${yy + 8}" x2="${x + 28}" y2="${yy + 8}" stroke="#000" stroke-dasharray="4 3"/>`;
       } else if (name === 'Faulted') {
