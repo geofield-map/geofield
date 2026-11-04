@@ -1,6 +1,6 @@
 // Stratigraphic log for a station: beds from base to top, drawn as a graphic column.
 import { state, saveStation, getStation } from './state.js';
-import { uid } from './db.js';
+import { db, uid } from './db.js';
 import { $, esc, openModal, closeModal, toast, confirmBox, saveFile } from './ui.js';
 import { LITHOLOGIES } from './schema.js';
 import { FORMATION_NAMES, findFormation, CHART_LITHOLOGIES, chronoColour, formationColour } from './strat.js';
@@ -9,27 +9,50 @@ import { colourFieldHtml, bindColourField, colourHex } from './colours.js';
 export const GRAINS = ['Clay', 'Silt', 'Very fine sand', 'Fine sand', 'Medium sand', 'Coarse sand', 'Very coarse sand', 'Granule', 'Pebble', 'Cobble', 'Boulder'];
 const GRAIN_ABBR = ['cl', 'si', 'vf', 'f', 'm', 'c', 'vc', 'gr', 'pb', 'cb', 'bl'];
 const CONTACTS = ['Sharp', 'Erosional', 'Gradational', 'Unconformity', 'Faulted', 'Covered'];
-const LOG_LITHS = [...new Set([...CHART_LITHOLOGIES, ...LITHOLOGIES.Sedimentary, 'Igneous (intrusive)', 'Metamorphic', 'Covered / no exposure'])];
+// Lithologies offered in the log, grouped as in the picker. The first groups follow the chart's Lithology Key.
+export const LITH_GROUPS = [
+  ['Carbonates', ['Limestone', 'Dolomitic limestone', 'Argillaceous limestone', 'Calcarenite', 'Calcarenitic limestone', 'Wackestone',
+    'Dolomite', 'Argillaceous dolomite', 'Chalk', 'Marl']],
+  ['Clastics', ['Conglomerate', 'Breccia', 'Diamictite', 'Sandstone', 'Sandstone (bedded)', 'Arkose', 'Greywacke', 'Quartz arenite',
+    'Siltstone', 'Siltstone (irregular)', 'Silty clay, Mudstone', 'Mudstone', 'Shale-Claystone', 'Shale', 'Claystone', 'Tillite']],
+  ['Evaporites & chemical', ['Anhydrite', 'Gypsum', 'Salts', 'Halite', 'Evaporite', 'Chert', 'Ironstone', 'Phosphorite', 'Coal']],
+  ['Other', ['Volcanics', 'Igneous (intrusive)', 'Metamorphic', 'Basement', 'Dune sand', 'Rootlets / palaeosol', 'Covered / no exposure']],
+];
+const LOG_LITHS = [...new Set([...LITH_GROUPS.flatMap(g => g[1]), ...CHART_LITHOLOGIES, ...LITHOLOGIES.Sedimentary])];
 
-// Lithology -> SVG pattern id
+// Lithology -> SVG pattern id. Chart names first, then keywords for anything typed by hand.
+const PATTERN_BY_NAME = {
+  'limestone': 'p-limestone', 'dolomitic limestone': 'p-dol-lime', 'argillaceous limestone': 'p-arg-lime', 'calcarenite': 'p-calcarenite',
+  'calcarenitic limestone': 'p-calc-lime', 'calcarenous limestone': 'p-calc-lime', 'wackestone': 'p-wackestone', 'dolomite': 'p-dolomite',
+  'argillaceous dolomite': 'p-arg-dol', 'shale-claystone': 'p-shale', 'diamictite': 'p-diamictite', 'diamictites': 'p-diamictite',
+  'conglomerate': 'p-congl', 'anhydrite': 'p-anhydrite', 'gypsum': 'p-gypsum', 'sandstone': 'p-sand', 'sandstone (bedded)': 'p-sand-bed',
+  'silty clay, mudstone': 'p-mud', 'siltstone': 'p-silt', 'siltstone (irregular)': 'p-silt-irr', 'salts': 'p-salt', 'volcanics': 'p-volc',
+  'basement': 'p-basement', 'dune sand': 'p-dune', 'rootlets / palaeosol': 'p-roots',
+};
 function patternFor(lith = '') {
-  const l = lith.toLowerCase();
+  const l = lith.toLowerCase().trim();
+  if (PATTERN_BY_NAME[l]) return PATTERN_BY_NAME[l];
   if (l.includes('covered')) return 'p-covered';
-  if (l.includes('basement')) return 'p-ign';
-  if (l.includes('salt')) return 'p-evap';
-  if (l.includes('dune')) return 'p-sand';
-  if (l.includes('argillaceous limestone')) return 'p-marl';
-  if (l.includes('calcaren') || l.includes('wackestone')) return 'p-limestone';
-  if (l.includes('conglom') || l.includes('tillite') || l.includes('diamict')) return 'p-congl';
+  if (l.includes('basement')) return 'p-basement';
+  if (l.includes('salt') || l.includes('halite')) return 'p-salt';
+  if (l.includes('dune')) return 'p-dune';
+  if (l.includes('root') || l.includes('palaeosol') || l.includes('paleosol')) return 'p-roots';
+  if (l.includes('anhydrite')) return 'p-anhydrite';
+  if (l.includes('gypsum')) return 'p-gypsum';
+  if (l.includes('conglom') || l.includes('tillite')) return 'p-congl';
+  if (l.includes('diamict')) return 'p-diamictite';
   if (l.includes('breccia')) return 'p-breccia';
+  if (l.includes('wackestone')) return 'p-wackestone';
+  if (l.includes('calcaren')) return 'p-calcarenite';
   if (l.includes('dolom')) return 'p-dolomite';
   if (l.includes('limestone') || l.includes('chalk')) return 'p-limestone';
   if (l.includes('marl')) return 'p-marl';
   if (l.includes('silt')) return 'p-silt';
-  if (l.includes('shale') || l.includes('mud') || l.includes('clay')) return 'p-shale';
+  if (l.includes('mud')) return 'p-mud';
+  if (l.includes('shale') || l.includes('clay')) return 'p-shale';
   if (l.includes('sand') || l.includes('arkose') || l.includes('greywacke') || l.includes('arenite')) return 'p-sand';
   if (l.includes('chert')) return 'p-chert';
-  if (l.includes('evap') || l.includes('gypsum') || l.includes('anhydrite') || l.includes('halite')) return 'p-evap';
+  if (l.includes('evap')) return 'p-evap';
   if (l.includes('coal')) return 'p-coal';
   if (l.includes('volcan')) return 'p-volc';
   if (l.includes('igneous')) return 'p-ign';
@@ -39,24 +62,43 @@ function patternFor(lith = '') {
 }
 
 // Lithology symbols are drawn over a fill: the bed's chosen colour, or the default colour below.
+// Default colours follow the chart's Lithology Key.
 // [id, width, height, default fill, symbol markup with INK as the symbol colour]
+const BRICK = 'M0 0H16M0 6H16M4 0V6M12 6V12';
+const RHOMB = 'M0 0H16M0 6H16M3 0L5 6M11 6L13 12';
 const PATTERNS = [
-  ['p-sand', 8, 8, '#fde9a8', '<circle cx="2" cy="2" r=".9" fill="INK"/><circle cx="6" cy="6" r=".9" fill="INK"/>'],
-  ['p-silt', 10, 8, '#e9dcae', '<line x1="0" y1="2" x2="5" y2="2" stroke="INK"/><circle cx="7.5" cy="6" r=".8" fill="INK"/>'],
-  ['p-shale', 12, 5, '#c9c9c9', '<line x1="0" y1="2.5" x2="7" y2="2.5" stroke="INK"/>'],
-  ['p-limestone', 16, 10, '#bfe3f2', '<path d="M0 0H16M0 5H16M4 0V5M12 5V10" stroke="INK" fill="none"/>'],
-  ['p-dolomite', 16, 10, '#d6d1f0', '<path d="M0 0H16M0 5H16M3 0L5 5M11 5L13 10" stroke="INK" fill="none"/>'],
-  ['p-marl', 16, 10, '#d4e8d0', '<path d="M0 0H16M4 0V5M2 7.5H10" stroke="INK" fill="none"/>'],
-  ['p-congl', 18, 14, '#f7d9a0', '<circle cx="5" cy="4" r="3" fill="none" stroke="INK"/><circle cx="13" cy="10" r="2.5" fill="none" stroke="INK"/><circle cx="14" cy="3" r=".8" fill="INK"/>'],
-  ['p-breccia', 18, 14, '#f2cfa0', '<path d="M2 6L6 1L8 6Z M10 13L13 8L16 13Z" fill="none" stroke="INK"/>'],
-  ['p-chert', 12, 8, '#e7e7e7', '<path d="M1 6L4 2L7 6Z" fill="INK"/>'],
-  ['p-evap', 10, 10, '#f6d1e6', '<path d="M0 0L10 10M10 0L0 10" stroke="INK" stroke-width=".7"/>'],
+  ['p-limestone', 16, 12, '#C3DDEF', `<path d="${BRICK}" stroke="INK" stroke-width=".8" fill="none"/>`],
+  ['p-dol-lime', 16, 12, '#BCD8EC', `<path d="${BRICK}M5 6L11 0M13 12L19 6M-3 12L3 6" stroke="INK" stroke-width=".7" fill="none"/>`],
+  ['p-arg-lime', 16, 12, '#A9BDD3', `<path d="${BRICK}M1 3H7M9 9H15" stroke="INK" stroke-width=".7" fill="none"/>`],
+  ['p-calcarenite', 16, 12, '#C3DDEF', `<path d="${BRICK}" stroke="INK" stroke-width=".7" fill="none"/><circle cx="8" cy="3" r=".9" fill="INK"/><circle cx="0" cy="9" r=".9" fill="INK"/><circle cx="16" cy="9" r=".9" fill="INK"/>`],
+  ['p-calc-lime', 16, 12, '#B6D2EA', `<path d="${BRICK}" stroke="INK" stroke-width=".7" fill="none"/><circle cx="2" cy="3" r=".8" fill="INK"/><circle cx="8" cy="9" r=".8" fill="INK"/>`],
+  ['p-wackestone', 16, 12, '#73B886', `<path d="${RHOMB}" stroke="INK" stroke-width=".7" fill="none"/><path d="M7 4.5L8.5 1.5L10 4.5Z M14 10.5L15.5 7.5L17 10.5Z" fill="INK"/>`],
+  ['p-dolomite', 16, 12, '#8FCC9E', `<path d="${RHOMB}" stroke="INK" stroke-width=".8" fill="none"/>`],
+  ['p-arg-dol', 16, 12, '#5FA070', `<path d="${RHOMB}M6 3H12M14 9H20M-2 9H4" stroke="INK" stroke-width=".7" fill="none"/>`],
+  ['p-marl', 16, 12, '#D4E8D0', `<path d="M0 0H16M4 0V6M2 9H10" stroke="INK" fill="none"/>`],
+  ['p-shale', 12, 5, '#CDB1A2', '<line x1="0" y1="2.5" x2="7" y2="2.5" stroke="INK"/>'],
+  ['p-diamictite', 16, 10, '#BC9A88', '<line x1="0" y1="2.5" x2="6" y2="2.5" stroke="INK"/><line x1="8" y1="7.5" x2="14" y2="7.5" stroke="INK"/><path d="M9 4L11 1L13 4Z M2 9L4 6L6 9Z" fill="INK"/>'],
+  ['p-congl', 20, 14, '#FFF6C8', '<ellipse cx="5" cy="4" rx="3" ry="2.2" fill="none" stroke="INK" stroke-width=".8"/><path d="M12 10l3-2 3 1-1 3-4 0z" fill="none" stroke="INK" stroke-width=".8"/><circle cx="15" cy="3" r=".8" fill="INK"/><circle cx="3" cy="11" r=".7" fill="INK"/>'],
+  ['p-breccia', 18, 14, '#F2CFA0', '<path d="M2 6L6 1L8 6Z M10 13L13 8L16 13Z" fill="none" stroke="INK"/>'],
+  ['p-sand', 8, 8, '#FFF3CF', '<circle cx="2" cy="2" r=".8" fill="INK"/><circle cx="6" cy="6" r=".8" fill="INK"/>'],
+  ['p-sand-bed', 24, 12, '#FFF0C8', '<circle cx="2" cy="2" r=".7" fill="INK"/><circle cx="14" cy="3" r=".7" fill="INK"/><circle cx="8" cy="9" r=".7" fill="INK"/><circle cx="20" cy="10" r=".7" fill="INK"/><path d="M0 11Q12 2 24 11" fill="none" stroke="INK" stroke-width=".5" stroke-dasharray="1 1.5"/>'],
+  ['p-mud', 12, 8, '#FCE1B0', '<line x1="0" y1="2" x2="6" y2="2" stroke="INK"/><circle cx="9" cy="2" r=".7" fill="INK"/><circle cx="3" cy="6" r=".7" fill="INK"/><line x1="6" y1="6" x2="12" y2="6" stroke="INK"/>'],
+  ['p-silt', 14, 8, '#FCEAC2', '<line x1="0" y1="2" x2="5" y2="2" stroke="INK"/><circle cx="7.5" cy="2" r=".7" fill="INK"/><circle cx="10" cy="2" r=".7" fill="INK"/><line x1="7" y1="6" x2="12" y2="6" stroke="INK"/><circle cx="2" cy="6" r=".7" fill="INK"/><circle cx="4.5" cy="6" r=".7" fill="INK"/>'],
+  ['p-silt-irr', 16, 8, '#FCEFD0', '<path d="M0 2q2 -1.5 4 0t4 0" fill="none" stroke="INK" stroke-width=".7"/><circle cx="11" cy="2" r=".7" fill="INK"/><path d="M8 6q2 -1.5 4 0t4 0" fill="none" stroke="INK" stroke-width=".7"/><circle cx="3" cy="6" r=".7" fill="INK"/>'],
+  ['p-anhydrite', 12, 10, '#F2BBD0', '<path d="M1 4L3 1.5L5 4M7 9L9 6.5L11 9" fill="none" stroke="INK" stroke-width=".7"/>'],
+  ['p-gypsum', 12, 10, '#F4C6D8', '<path d="M1 1.5L4 3L1 4.5M7 6.5L10 8L7 9.5" fill="none" stroke="INK" stroke-width=".7"/>'],
+  ['p-salt', 8, 8, '#E691C0', ''],
+  ['p-evap', 10, 10, '#F6D1E6', '<path d="M0 0L10 10M10 0L0 10" stroke="INK" stroke-width=".7"/>'],
+  ['p-chert', 12, 8, '#E7E7E7', '<path d="M1 6L4 2L7 6Z" fill="INK"/>'],
   ['p-coal', 4, 4, '#222222', ''],
-  ['p-ign', 14, 14, '#f4b6b6', '<path d="M3 1V7M0 4H6M10 8V14M7 11H13" stroke="INK"/>'],
-  ['p-volc', 14, 12, '#e7a9c8', '<path d="M1 2L3 6L5 2M8 7L10 11L12 7" stroke="INK" fill="none"/>'],
-  ['p-meta', 20, 8, '#c8d9b4', '<path d="M0 4Q5 0 10 4T20 4" stroke="INK" fill="none"/>'],
-  ['p-covered', 8, 8, '#ffffff', '<path d="M0 8L8 0" stroke="#aaa"/>'],
-  ['p-blank', 8, 8, '#eeeeee', ''],
+  ['p-volc', 14, 12, '#E99A80', '<path d="M1 2L3 6L5 2M8 7L10 11L12 7" stroke="INK" fill="none" stroke-width=".8"/>'],
+  ['p-basement', 16, 12, '#C9619B', '<path d="M2 3L5 1M9 5L12 2M4 9L7 7M11 11L14 8M14 4L16 3" stroke="INK" stroke-width=".7"/>'],
+  ['p-ign', 14, 14, '#F4B6B6', '<path d="M3 1V7M0 4H6M10 8V14M7 11H13" stroke="INK"/>'],
+  ['p-meta', 20, 8, '#C8D9B4', '<path d="M0 4Q5 0 10 4T20 4" stroke="INK" fill="none"/>'],
+  ['p-dune', 24, 12, '#FFF3CF', '<path d="M0 10Q8 2 16 10M6 10Q12 5 18 10M14 10Q20 3 24 6" fill="none" stroke="INK" stroke-width=".6"/>'],
+  ['p-roots', 16, 14, '#EFE3C8', '<path d="M8 2V8M8 8L5 12M8 8L11 12M8 6L6 8" fill="none" stroke="INK" stroke-width=".8"/>'],
+  ['p-covered', 8, 8, '#FFFFFF', '<path d="M0 8L8 0" stroke="#aaa"/>'],
+  ['p-blank', 8, 8, '#EEEEEE', ''],
 ];
 const DEFAULT_FILL = Object.fromEntries(PATTERNS.map(p => [p[0], p[3]]));
 
@@ -64,6 +106,74 @@ const DEFAULT_FILL = Object.fromEntries(PATTERNS.map(p => [p[0], p[3]]));
 const DEFS = `<defs>${PATTERNS.map(([id, w, h, , sym]) =>
   `<pattern id="${id}" width="${w}" height="${h}" patternUnits="userSpaceOnUse">${sym.replace(/INK/g, '#222')}</pattern>` +
   `<pattern id="${id}-l" width="${w}" height="${h}" patternUnits="userSpaceOnUse">${sym.replace(/INK/g, '#f2f2f2')}</pattern>`).join('')}</defs>`;
+
+// ---------- lithology picker (same look as the colour picker, with symbol swatches) ----------
+export function lithSwatch(name, w = 40, h = 26) {
+  const pat = patternFor(name), fill = DEFAULT_FILL[pat];
+  return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"><rect width="${w}" height="${h}" fill="${fill}"/>
+    <rect width="${w}" height="${h}" fill="url(#${pat}${isDark(fill) ? '-l' : ''})" stroke="#000" stroke-width=".8"/></svg>`;
+}
+
+let lithOverlay = null;
+async function recentLiths() { const r = await db.get('meta', 'recentLiths'); return r ? r.value : []; }
+async function rememberLith(v) {
+  const list = (await recentLiths()).filter(x => x !== v); list.unshift(v);
+  await db.put('meta', { id: 'recentLiths', value: list.slice(0, 6) });
+}
+
+export async function pickLithology(current) {
+  const rec = await recentLiths();
+  if (!lithOverlay) {
+    lithOverlay = document.createElement('div');
+    lithOverlay.id = 'lith-picker';
+    document.body.appendChild(lithOverlay);
+  }
+  const chip = name => `<button class="cp-chip" data-v="${esc(name)}"><span class="lp-sw">${lithSwatch(name)}</span><span class="cp-txt"><span>${esc(name)}</span></span></button>`;
+  lithOverlay.innerHTML = `<svg width="0" height="0" style="position:absolute">${DEFS}</svg><div class="cp-card">
+    <div class="cp-head"><b>Choose lithology</b><button class="icon-btn" data-act="close">&times;</button></div>
+    <div class="cp-tools"><input type="search" placeholder="Search: limestone, sand, dolomite…" class="cp-search">
+      <div class="btns" style="margin:8px 0 0"><button class="btn small" data-act="custom">Type my own</button><button class="btn small danger" data-act="clear">Clear</button></div></div>
+    <div class="cp-body">
+      ${rec.length ? `<div class="cp-group" data-fixed><div class="group-title">Recently used</div><div class="cp-grid">${rec.map(chip).join('')}</div></div>` : ''}
+      ${LITH_GROUPS.map(([g, list]) => `<div class="cp-group"><div class="group-title">${g}</div><div class="cp-grid">${list.map(chip).join('')}</div></div>`).join('')}
+    </div></div>`;
+  lithOverlay.classList.remove('hidden');
+  return new Promise(resolve => {
+    const done = v => { lithOverlay.classList.add('hidden'); lithOverlay.onclick = null; if (v) rememberLith(v); resolve(v); };
+    lithOverlay.onclick = e => {
+      if (e.target === lithOverlay) return done(undefined);
+      const btn = e.target.closest('button');
+      if (!btn) return;
+      if (btn.dataset.act === 'close') return done(undefined);
+      if (btn.dataset.act === 'clear') return done('');
+      if (btn.dataset.act === 'custom') { const v = window.prompt('Lithology', current || ''); if (v != null) done(v.trim()); return; }
+      if (btn.dataset.v != null) done(btn.dataset.v);
+    };
+    const search = lithOverlay.querySelector('.cp-search');
+    search.oninput = () => {
+      const q = search.value.toLowerCase().trim();
+      lithOverlay.querySelectorAll('.cp-group').forEach(g => {
+        let any = false;
+        g.querySelectorAll('.cp-chip').forEach(c => { const show = !q || c.dataset.v.toLowerCase().includes(q); c.style.display = show ? '' : 'none'; if (show) any = true; });
+        g.style.display = any && !(q && g.hasAttribute('data-fixed')) ? '' : 'none';
+      });
+    };
+  });
+}
+
+function lithFieldHtml(value) {
+  return `<div class="colour-field lith-field"><span class="lp-sw small">${value ? lithSwatch(value, 30, 24) : ''}</span>
+    <input type="text" readonly id="bd-lith" value="${esc(value || '')}" placeholder="Tap to choose a lithology"></div>`;
+}
+function bindLithField(wrapper) {
+  const input = wrapper.querySelector('input');
+  wrapper.addEventListener('click', async () => {
+    const v = await pickLithology(input.value);
+    if (v === undefined) return;
+    input.value = v;
+    wrapper.querySelector('.lp-sw').innerHTML = v ? lithSwatch(v, 30, 24) : '';
+  });
+}
 
 function isDark(hex) {
   const n = parseInt(hex.slice(1), 16);
@@ -74,11 +184,14 @@ function isDark(hex) {
 function grainIndex(bed) {
   const i = GRAINS.indexOf(bed.grain);
   if (i >= 0) return i;
+  // no grain size given: a sensible default width for the lithology
   const p = patternFor(bed.lithology);
-  if (p === 'p-shale') return 0;
-  if (p === 'p-limestone' || p === 'p-dolomite' || p === 'p-marl' || p === 'p-chert' || p === 'p-evap' || p === 'p-coal') return 1;
-  if (p === 'p-covered') return 0;
-  return 4;
+  if (['p-shale', 'p-mud', 'p-covered'].includes(p)) return 0;
+  if (['p-silt', 'p-silt-irr'].includes(p)) return 1;
+  if (['p-congl', 'p-breccia', 'p-diamictite'].includes(p)) return 8;
+  if (['p-sand', 'p-sand-bed', 'p-dune'].includes(p)) return 4;
+  if (['p-ign', 'p-meta', 'p-basement', 'p-volc', 'p-blank'].includes(p)) return 4;
+  return 2; // carbonates, evaporites, chert, coal
 }
 
 function wrapText(text, maxChars) {
@@ -141,7 +254,7 @@ export function logSvg(st) {
   ];
   const colX = 2 + cols.length * 17 + 40, minW = 30, stepW = 13, textX = colX + minW + stepW * 10 + 20, W = textX + 280;
   const heights = beds.map(b => Math.max(10, (Number(b.thickness) || 0) * pxPerM));
-  const headTop = 30, headH = 62, top = headTop + headH;
+  const headTop = 30, headH = 62, top = headTop + headH + 14; // gap keeps the top depth label clear of the header
   const colBottom = top + heights.reduce((a, b) => a + b, 0);
 
   // legend entries: lithologies and contacts used in this log
@@ -156,8 +269,8 @@ export function logSvg(st) {
   }
   const contacts = [...new Set(beds.map(b => b.contact).filter(c => ['Erosional', 'Unconformity', 'Gradational', 'Faulted'].includes(c)))];
   const legendItems = liths.length + contacts.length;
-  const legendTop = colBottom + 50, legendRows = Math.ceil(legendItems / 2);
-  const H = legendItems ? legendTop + 24 + legendRows * 22 + 10 : colBottom + 60;
+  const legendTop = colBottom + 80, legendRows = Math.ceil(legendItems / 2);
+  const H = legendItems ? legendTop + 24 + legendRows * 22 + 10 : colBottom + 75;
 
   const esc2 = s => esc(s);
   let s = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" font-family="Helvetica, Arial, sans-serif">${DEFS}
@@ -231,11 +344,19 @@ export function logSvg(st) {
   }
   s += `<line x1="${colX - 14}" y1="${y}" x2="${colX - 10}" y2="${y}" stroke="#000"/><text x="${colX - 16}" y="${y + 4}" font-size="9" text-anchor="end">0</text>`;
   // grain-size scale
+  const gx = i => colX + minW + stepW * i;
   GRAIN_ABBR.forEach((a, i) => {
-    const x = colX + minW + stepW * i;
-    s += `<line x1="${x}" y1="${y}" x2="${x}" y2="${y + 5}" stroke="#000"/><text x="${x}" y="${y + 15}" font-size="8" text-anchor="middle">${a}</text>`;
+    s += `<line x1="${gx(i)}" y1="${y}" x2="${gx(i)}" y2="${y + 4}" stroke="#000"/><text x="${gx(i)}" y="${y + 13}" font-size="8" text-anchor="middle">${a}</text>`;
   });
-  s += `<text x="${colX}" y="${y + 30}" font-size="9" fill="#555">Grain size · scale 1 m = ${pxPerM.toFixed(0)} px</text>`;
+  // stepped class line: ticks grow taller from clay to gravel, class names underneath
+  const base = y + 32, end = gx(10) + 6, mid = (a, b) => (gx(a) + gx(b)) / 2;
+  const steps = [[colX, 4], [mid(0, 1), 7], [mid(1, 2), 10], [mid(6, 7), 13], [end, 16]];
+  s += `<line x1="${colX}" y1="${base}" x2="${end}" y2="${base}" stroke="#000" stroke-width="1.2"/>`;
+  steps.forEach(([x, h]) => { s += `<line x1="${x}" y1="${base}" x2="${x}" y2="${base - h}" stroke="#000"/>`; });
+  [['Clay', 0, 1], ['Silt', 1, 2], ['Sand', 2, 3], ['Gravel', 3, 4]].forEach(([name, a, b]) => {
+    s += `<text x="${(steps[a][0] + steps[b][0]) / 2}" y="${base + 11}" font-size="9" text-anchor="middle">${name}</text>`;
+  });
+  s += `<text x="${colX}" y="${base + 26}" font-size="9" fill="#555">Grain size · scale 1 m = ${pxPerM.toFixed(0)} px</text>`;
 
   // legend
   if (legendItems) {
@@ -338,7 +459,7 @@ function editBed(st, index) {
       <div class="field"><label>Thickness (m)</label><input type="number" inputmode="decimal" step="any" id="bd-th" value="${esc(b.thickness)}"></div>
       <div class="field"><label>Base contact</label><select id="bd-contact">${opts(CONTACTS, b.contact)}</select></div>
     </div>
-    <div class="field"><label>Lithology</label><select id="bd-lith">${opts(LOG_LITHS, b.lithology)}</select></div>
+    <div class="field"><label>Lithology</label>${lithFieldHtml(b.lithology)}</div>
     <div class="grid2">
       <div class="field"><label>Grain size</label><select id="bd-grain">${opts(GRAINS, b.grain)}</select></div>
       <div class="field"><label>Shape in log</label><select id="bd-shape">${BED_SHAPES.map(o => `<option ${o === (b.shape || 'Straight') ? 'selected' : ''}>${o}</option>`).join('')}</select></div>
@@ -351,7 +472,8 @@ function editBed(st, index) {
     <div class="btns"><button class="btn primary" id="bd-save">Save</button>
       ${index != null ? '<button class="btn" id="bd-up">Move up</button><button class="btn" id="bd-down">Move down</button><button class="btn danger" id="bd-del">Delete</button>' : ''}</div>`);
   const v = id => body.querySelector(id).value;
-  bindColourField(body.querySelector('.colour-field'));
+  bindColourField(body.querySelector('.colour-field:not(.lith-field)'));
+  bindLithField(body.querySelector('.lith-field'));
   body.querySelector('#bd-fm').onchange = e => { b.member = ''; body.querySelector('#bd-mbr').innerHTML = memberOpts(e.target.value); };
   body.querySelector('#bd-save').onclick = async () => {
     const th = Number(v('#bd-th'));
