@@ -123,7 +123,7 @@ function editField(index) {
   const groups = [...new Set(schema.map(x => x.group).filter(Boolean))];
   const body = openModal(index == null ? 'New field' : 'Edit field', `
     <div class="field"><label>Label (shown in form and CSV)</label><input type="text" id="fd-label" value="${esc(f.label)}"></div>
-    <div class="field"><label>Type</label><select id="fd-type">${['text', 'number', 'select', 'textarea', 'date'].map(t => `<option ${t === f.type ? 'selected' : ''} value="${t}">${{ text: 'Text', number: 'Number', select: 'Dropdown list', textarea: 'Long text', date: 'Date' }[t]}</option>`).join('')}</select></div>
+    <div class="field"><label>Type</label><select id="fd-type">${['text', 'number', 'select', 'textarea', 'date', 'colour'].map(t => `<option ${t === f.type ? 'selected' : ''} value="${t}">${{ text: 'Text', number: 'Number', select: 'Dropdown list', textarea: 'Long text', date: 'Date', colour: 'Rock colour (chart)' }[t]}</option>`).join('')}</select></div>
     <div class="field" id="fd-opts-wrap"><label>Dropdown choices (one per line)</label><textarea id="fd-opts" style="min-height:140px">${esc((f.options || []).join('\n'))}</textarea></div>
     <div class="field"><label>Section</label><input type="text" id="fd-group" list="fd-groups" value="${esc(f.group || '')}"><datalist id="fd-groups">${groups.map(g => `<option value="${esc(g)}">`).join('')}</datalist></div>
     <div class="field"><label>Auto-fill from</label><select id="fd-auto">${Object.entries(AUTO_SOURCES).map(([k, v]) => `<option value="${k}" ${k === (f.auto || '') ? 'selected' : ''}>${v}</option>`).join('')}</select></div>

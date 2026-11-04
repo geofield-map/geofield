@@ -6,6 +6,7 @@ import { toUTM, toDMS } from './geo.js';
 import { LITHOLOGIES, ALL_LITHOLOGIES } from './schema.js';
 import { autofillFromLayers } from './layers.js';
 import { findFormation, FORMATION_FILLS } from './strat.js';
+import { colourFieldHtml, bindColourField } from './colours.js';
 import { renderStationStructures } from './structures.js';
 
 let nav = {};
@@ -137,6 +138,7 @@ function inputHtml(f, value, attrs) {
     case 'date': return `<input type="date" data-key="${f.key}" value="${esc(v)}">`;
     case 'textarea': return `<textarea data-key="${f.key}">${esc(v)}</textarea>`;
     case 'select': return selectHtml(f, v, attrs);
+    case 'colour': return colourFieldHtml(f.key, v);
     default: return `<input type="text" data-key="${f.key}" value="${esc(v)}" autocapitalize="sentences">`;
   }
 }
@@ -206,6 +208,7 @@ function renderForm(st, body) {
     el.addEventListener(el.tagName === 'SELECT' ? 'change' : 'input', handler);
   };
   body.querySelectorAll('[data-key]').forEach(bind);
+  body.querySelectorAll('.colour-field').forEach(bindColourField);
 
   $('#st-map').onclick = () => nav.showOnMap(st);
   $('#st-regps').onclick = async () => {

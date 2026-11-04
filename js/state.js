@@ -28,6 +28,7 @@ export async function loadProject(id) {
     project = all.sort((a, b) => (b.lastOpened || '').localeCompare(a.lastOpened || ''))[0];
   }
   if (!project) { project = newProject(); }
+  upgradeSchema(project);
   project.lastOpened = new Date().toISOString();
   await db.put('projects', project);
   await db.put('meta', { id: 'currentProject', value: project.id });
@@ -36,6 +37,15 @@ export async function loadProject(id) {
   emit('project', project);
   emit('stations', state.stations);
   return project;
+}
+
+// Forms saved by older app versions: switch the default colour fields to the colour picker.
+function upgradeSchema(project) {
+  const defaults = cloneSchema();
+  for (const f of project.schema) {
+    const d = defaults.find(x => x.key === f.key);
+    if (d && d.type === 'colour' && f.type === 'text') f.type = 'colour';
+  }
 }
 
 export async function saveProject() {

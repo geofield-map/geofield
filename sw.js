@@ -1,11 +1,11 @@
 // Offline support: keeps the app, its libraries and viewed map tiles on the phone.
-const VERSION = 'geofield-v2';
+const VERSION = 'geofield-v3';
 const TILE_CACHE = 'geofield-tiles';
 
 const APP_FILES = [
   './', 'index.html', 'styles.css', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png',
   'js/app.js', 'js/db.js', 'js/geo.js', 'js/schema.js', 'js/ui.js', 'js/state.js', 'js/layers.js', 'js/mapview.js',
-  'js/station.js', 'js/structures.js', 'js/log.js', 'js/export.js', 'js/project.js', 'js/strat.js',
+  'js/station.js', 'js/structures.js', 'js/log.js', 'js/export.js', 'js/project.js', 'js/strat.js', 'js/colours.js',
 ];
 const LIBS = [
   'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css',

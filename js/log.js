@@ -4,6 +4,7 @@ import { uid } from './db.js';
 import { $, esc, openModal, closeModal, toast, confirmBox, saveFile } from './ui.js';
 import { LITHOLOGIES } from './schema.js';
 import { FORMATION_NAMES, findFormation, CHART_LITHOLOGIES } from './strat.js';
+import { colourFieldHtml, bindColourField, colourHex } from './colours.js';
 
 export const GRAINS = ['Clay', 'Silt', 'Very fine sand', 'Fine sand', 'Medium sand', 'Coarse sand', 'Very coarse sand', 'Granule', 'Pebble', 'Cobble', 'Boulder'];
 const GRAIN_ABBR = ['cl', 'si', 'vf', 'f', 'm', 'c', 'vc', 'gr', 'pb', 'cb', 'bl'];
@@ -110,6 +111,8 @@ export function logSvg(st) {
     const b = beds[i], h = heights[i];
     const w = minW + stepW * grainIndex(b);
     s += `<rect x="${colX}" y="${y}" width="${w}" height="${h}" fill="url(#${patternFor(b.lithology)})" stroke="#000" stroke-width="1"/>`;
+    const hex = colourHex(b.color);
+    if (hex) s += `<rect x="${colX - 8}" y="${y}" width="6" height="${h}" fill="${hex}" stroke="#666" stroke-width=".5"/>`;
     // base contact
     const by = y + h;
     if (b.contact === 'Erosional' || b.contact === 'Unconformity') {
@@ -219,7 +222,7 @@ function editBed(st, index) {
     </div>
     <div class="field"><label>Lithology</label><select id="bd-lith">${opts(LOG_LITHS, b.lithology)}</select></div>
     <div class="field"><label>Grain size</label><select id="bd-grain">${opts(GRAINS, b.grain)}</select></div>
-    <div class="field"><label>Colour</label><input type="text" id="bd-color" value="${esc(b.color)}" placeholder="e.g. Reddish brown"></div>
+    <div class="field"><label>Colour</label>${colourFieldHtml('bd-color', b.color, 'id')}</div>
     <div class="field"><label>Sedimentary structures</label><input type="text" id="bd-struct" value="${esc(b.structures)}" placeholder="e.g. Trough cross-bedding"></div>
     <div class="field"><label>Fossils</label><input type="text" id="bd-fossils" value="${esc(b.fossils)}"></div>
     <div class="field"><label>Description</label><textarea id="bd-desc">${esc(b.description)}</textarea></div>
@@ -227,6 +230,7 @@ function editBed(st, index) {
     <div class="btns"><button class="btn primary" id="bd-save">Save</button>
       ${index != null ? '<button class="btn" id="bd-up">Move up</button><button class="btn" id="bd-down">Move down</button><button class="btn danger" id="bd-del">Delete</button>' : ''}</div>`);
   const v = id => body.querySelector(id).value;
+  bindColourField(body.querySelector('.colour-field'));
   body.querySelector('#bd-fm').onchange = e => { b.member = ''; body.querySelector('#bd-mbr').innerHTML = memberOpts(e.target.value); };
   body.querySelector('#bd-save').onclick = async () => {
     const th = Number(v('#bd-th'));

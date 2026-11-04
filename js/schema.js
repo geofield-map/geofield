@@ -1,5 +1,5 @@
 // Default station form (based on the Ma'aden Standard Field Book) plus geology fields.
-// Field types: text, number, select (with free entry), textarea, date.
+// Field types: text, number, select (with free entry), textarea, date, colour (rock colour picker).
 // auto: value the app fills automatically. showIf: only shown for some rock classes.
 import { FORMATION_NAMES, ALL_MEMBERS } from './strat.js';
 
@@ -76,8 +76,8 @@ export const DEFAULT_SCHEMA = [
   { key: 'period', label: 'Period', type: 'select', group: 'Geology', options: ['Quaternary', 'Neogene', 'Paleogene', 'Cretaceous', 'Jurassic', 'Triassic', 'Permian', 'Carboniferous', 'Devonian', 'Silurian', 'Ordovician', 'Cambrian', 'Ediacaran', 'Cryogenian', 'Tonian'] },
   { key: 'epoch', label: 'Epoch', type: 'text', group: 'Geology' },
   { key: 'age', label: 'Age / Stage', type: 'text', group: 'Geology' },
-  { key: 'colour_fresh', label: 'Colour (fresh)', type: 'text', group: 'Geology' },
-  { key: 'colour_weathered', label: 'Colour (weathered)', type: 'text', group: 'Geology' },
+  { key: 'colour_fresh', label: 'Colour (fresh)', type: 'colour', group: 'Geology' },
+  { key: 'colour_weathered', label: 'Colour (weathered)', type: 'colour', group: 'Geology' },
   { key: 'weathering', label: 'Weathering', type: 'select', group: 'Geology', options: ['Fresh', 'Slightly', 'Moderately', 'Highly', 'Completely'] },
 
   // Sedimentary
