@@ -38,24 +38,38 @@ function patternFor(lith = '') {
   return 'p-blank';
 }
 
-const DEFS = `<defs>
-  <pattern id="p-sand" width="8" height="8" patternUnits="userSpaceOnUse"><rect width="8" height="8" fill="#fde9a8"/><circle cx="2" cy="2" r=".9" fill="#333"/><circle cx="6" cy="6" r=".9" fill="#333"/></pattern>
-  <pattern id="p-silt" width="10" height="8" patternUnits="userSpaceOnUse"><rect width="10" height="8" fill="#e9dcae"/><line x1="0" y1="2" x2="5" y2="2" stroke="#333"/><circle cx="7.5" cy="6" r=".8" fill="#333"/></pattern>
-  <pattern id="p-shale" width="12" height="5" patternUnits="userSpaceOnUse"><rect width="12" height="5" fill="#c9c9c9"/><line x1="0" y1="2.5" x2="7" y2="2.5" stroke="#333"/></pattern>
-  <pattern id="p-limestone" width="16" height="10" patternUnits="userSpaceOnUse"><rect width="16" height="10" fill="#bfe3f2"/><path d="M0 0H16M0 5H16M4 0V5M12 5V10" stroke="#333" fill="none"/></pattern>
-  <pattern id="p-dolomite" width="16" height="10" patternUnits="userSpaceOnUse"><rect width="16" height="10" fill="#d6d1f0"/><path d="M0 0H16M0 5H16M3 0L5 5M11 5L13 10" stroke="#333" fill="none"/></pattern>
-  <pattern id="p-marl" width="16" height="10" patternUnits="userSpaceOnUse"><rect width="16" height="10" fill="#d4e8d0"/><path d="M0 0H16M4 0V5M2 7.5H10" stroke="#333" fill="none"/></pattern>
-  <pattern id="p-congl" width="18" height="14" patternUnits="userSpaceOnUse"><rect width="18" height="14" fill="#f7d9a0"/><circle cx="5" cy="4" r="3" fill="none" stroke="#333"/><circle cx="13" cy="10" r="2.5" fill="none" stroke="#333"/><circle cx="14" cy="3" r=".8" fill="#333"/></pattern>
-  <pattern id="p-breccia" width="18" height="14" patternUnits="userSpaceOnUse"><rect width="18" height="14" fill="#f2cfa0"/><path d="M2 6L6 1L8 6Z M10 13L13 8L16 13Z" fill="none" stroke="#333"/></pattern>
-  <pattern id="p-chert" width="12" height="8" patternUnits="userSpaceOnUse"><rect width="12" height="8" fill="#e7e7e7"/><path d="M1 6L4 2L7 6Z" fill="#333"/></pattern>
-  <pattern id="p-evap" width="10" height="10" patternUnits="userSpaceOnUse"><rect width="10" height="10" fill="#f6d1e6"/><path d="M0 0L10 10M10 0L0 10" stroke="#555" stroke-width=".7"/></pattern>
-  <pattern id="p-coal" width="4" height="4" patternUnits="userSpaceOnUse"><rect width="4" height="4" fill="#222"/></pattern>
-  <pattern id="p-ign" width="14" height="14" patternUnits="userSpaceOnUse"><rect width="14" height="14" fill="#f4b6b6"/><path d="M3 1V7M0 4H6M10 8V14M7 11H13" stroke="#333"/></pattern>
-  <pattern id="p-volc" width="14" height="12" patternUnits="userSpaceOnUse"><rect width="14" height="12" fill="#e7a9c8"/><path d="M1 2L3 6L5 2M8 7L10 11L12 7" stroke="#333" fill="none"/></pattern>
-  <pattern id="p-meta" width="20" height="8" patternUnits="userSpaceOnUse"><rect width="20" height="8" fill="#c8d9b4"/><path d="M0 4Q5 0 10 4T20 4" stroke="#333" fill="none"/></pattern>
-  <pattern id="p-covered" width="8" height="8" patternUnits="userSpaceOnUse"><rect width="8" height="8" fill="#fff"/><path d="M0 8L8 0" stroke="#aaa"/></pattern>
-  <pattern id="p-blank" width="8" height="8" patternUnits="userSpaceOnUse"><rect width="8" height="8" fill="#eee"/></pattern>
-</defs>`;
+// Lithology symbols are drawn over a fill: the bed's chosen colour, or the default colour below.
+// [id, width, height, default fill, symbol markup with INK as the symbol colour]
+const PATTERNS = [
+  ['p-sand', 8, 8, '#fde9a8', '<circle cx="2" cy="2" r=".9" fill="INK"/><circle cx="6" cy="6" r=".9" fill="INK"/>'],
+  ['p-silt', 10, 8, '#e9dcae', '<line x1="0" y1="2" x2="5" y2="2" stroke="INK"/><circle cx="7.5" cy="6" r=".8" fill="INK"/>'],
+  ['p-shale', 12, 5, '#c9c9c9', '<line x1="0" y1="2.5" x2="7" y2="2.5" stroke="INK"/>'],
+  ['p-limestone', 16, 10, '#bfe3f2', '<path d="M0 0H16M0 5H16M4 0V5M12 5V10" stroke="INK" fill="none"/>'],
+  ['p-dolomite', 16, 10, '#d6d1f0', '<path d="M0 0H16M0 5H16M3 0L5 5M11 5L13 10" stroke="INK" fill="none"/>'],
+  ['p-marl', 16, 10, '#d4e8d0', '<path d="M0 0H16M4 0V5M2 7.5H10" stroke="INK" fill="none"/>'],
+  ['p-congl', 18, 14, '#f7d9a0', '<circle cx="5" cy="4" r="3" fill="none" stroke="INK"/><circle cx="13" cy="10" r="2.5" fill="none" stroke="INK"/><circle cx="14" cy="3" r=".8" fill="INK"/>'],
+  ['p-breccia', 18, 14, '#f2cfa0', '<path d="M2 6L6 1L8 6Z M10 13L13 8L16 13Z" fill="none" stroke="INK"/>'],
+  ['p-chert', 12, 8, '#e7e7e7', '<path d="M1 6L4 2L7 6Z" fill="INK"/>'],
+  ['p-evap', 10, 10, '#f6d1e6', '<path d="M0 0L10 10M10 0L0 10" stroke="INK" stroke-width=".7"/>'],
+  ['p-coal', 4, 4, '#222222', ''],
+  ['p-ign', 14, 14, '#f4b6b6', '<path d="M3 1V7M0 4H6M10 8V14M7 11H13" stroke="INK"/>'],
+  ['p-volc', 14, 12, '#e7a9c8', '<path d="M1 2L3 6L5 2M8 7L10 11L12 7" stroke="INK" fill="none"/>'],
+  ['p-meta', 20, 8, '#c8d9b4', '<path d="M0 4Q5 0 10 4T20 4" stroke="INK" fill="none"/>'],
+  ['p-covered', 8, 8, '#ffffff', '<path d="M0 8L8 0" stroke="#aaa"/>'],
+  ['p-blank', 8, 8, '#eeeeee', ''],
+];
+const DEFAULT_FILL = Object.fromEntries(PATTERNS.map(p => [p[0], p[3]]));
+
+// Each pattern twice: dark symbols for light colours, light symbols ("-l") for dark colours.
+const DEFS = `<defs>${PATTERNS.map(([id, w, h, , sym]) =>
+  `<pattern id="${id}" width="${w}" height="${h}" patternUnits="userSpaceOnUse">${sym.replace(/INK/g, '#222')}</pattern>` +
+  `<pattern id="${id}-l" width="${w}" height="${h}" patternUnits="userSpaceOnUse">${sym.replace(/INK/g, '#f2f2f2')}</pattern>`).join('')}</defs>`;
+
+function isDark(hex) {
+  const n = parseInt(hex.slice(1), 16);
+  const lum = 0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255);
+  return lum < 105;
+}
 
 function grainIndex(bed) {
   const i = GRAINS.indexOf(bed.grain);
@@ -110,9 +124,10 @@ export function logSvg(st) {
   for (const i of order) {
     const b = beds[i], h = heights[i];
     const w = minW + stepW * grainIndex(b);
-    s += `<rect x="${colX}" y="${y}" width="${w}" height="${h}" fill="url(#${patternFor(b.lithology)})" stroke="#000" stroke-width="1"/>`;
-    const hex = colourHex(b.color);
-    if (hex) s += `<rect x="${colX - 8}" y="${y}" width="6" height="${h}" fill="${hex}" stroke="#666" stroke-width=".5"/>`;
+    const pat = patternFor(b.lithology);
+    const fill = colourHex(b.color) || DEFAULT_FILL[pat];
+    s += `<rect x="${colX}" y="${y}" width="${w}" height="${h}" fill="${fill}"/>`;
+    s += `<rect x="${colX}" y="${y}" width="${w}" height="${h}" fill="url(#${pat}${isDark(fill) ? '-l' : ''})" stroke="#000" stroke-width="1"/>`;
     // base contact
     const by = y + h;
     if (b.contact === 'Erosional' || b.contact === 'Unconformity') {
@@ -127,7 +142,7 @@ export function logSvg(st) {
     s += `<line x1="${colX - 14}" y1="${y}" x2="${colX - 10}" y2="${y}" stroke="#000"/><text x="${colX - 16}" y="${y + 4}" font-size="9" text-anchor="end">${(Math.round(cum * 100) / 100)}</text>`;
     cum -= Number(b.thickness) || 0;
     // description
-    const desc = [`${i + 1}. ${b.lithology || ''}${b.thickness ? ' (' + b.thickness + ' m)' : ''}`, [b.color, b.grain, b.structures, b.fossils].filter(Boolean).join(', '), b.description, b.sample ? 'Sample: ' + b.sample : '']
+    const desc = [`${i + 1}. ${b.lithology || ''}${b.thickness ? ' (' + b.thickness + ' m)' : ''}`, [b.color, b.grain, b.structures, b.fossils].map(t => String(t || '').trim()).filter(Boolean).join(', '), b.description, b.sample ? 'Sample: ' + b.sample : '']
       .filter(Boolean).flatMap((t, k) => wrapText(t, 46).map(line => ({ line, bold: k === 0 })));
     const maxLines = Math.max(1, Math.floor(h / 11));
     desc.slice(0, Math.max(maxLines, 1)).forEach((d, k) => {
