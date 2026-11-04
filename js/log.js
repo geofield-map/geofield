@@ -209,6 +209,12 @@ function grainIndex(bed) {
   return 2; // carbonates, evaporites, chert, coal
 }
 
+// Colour name without its Munsell code, e.g. "Moderate red (5R 5/4)" -> "Moderate red".
+// Also covers mottled colours, which carry a code after each name. The code stays in the saved data.
+function stripCode(text) {
+  return String(text || '').replace(/\s*\((?:\d+(?:\.\d+)?\s*(?:YR|GY|BG|PB|RP|R|Y|G|B|P)\s+\d+(?:\.\d+)?\s*\/\s*\d+(?:\.\d+)?|N\s*\d+(?:\.\d+)?)\)/gi, '').trim();
+}
+
 function wrapText(text, maxChars) {
   const words = String(text || '').split(/\s+/); const lines = []; let cur = '';
   for (const w of words) { if ((cur + ' ' + w).trim().length > maxChars) { if (cur) lines.push(cur); cur = w; } else cur = (cur + ' ' + w).trim(); }
@@ -279,7 +285,7 @@ export function logSvg(st) {
     if (!b.lithology) continue;
     const pat = patternFor(b.lithology), fill = colourHex(b.color) || DEFAULT_FILL[pat];
     if (liths.some(l => l.name === b.lithology && l.fill === fill)) continue;
-    const colourName = colourHex(b.color) ? String(b.color).replace(/\s*\([^)]*\)\s*$/, '') : '';
+    const colourName = colourHex(b.color) ? stripCode(b.color) : '';
     liths.push({ name: b.lithology, pat, fill, colourName });
   }
   const contacts = [...new Set(beds.map(b => b.contact).filter(c => ['Erosional', 'Unconformity', 'Gradational', 'Faulted'].includes(c)))];
@@ -348,7 +354,7 @@ export function logSvg(st) {
     s += `<line x1="${colX - 14}" y1="${y}" x2="${colX - 10}" y2="${y}" stroke="#000"/><text x="${colX - 16}" y="${y + 4}" font-size="9" text-anchor="end">${(Math.round(cum * 100) / 100)}</text>`;
     cum -= Number(b.thickness) || 0;
     // description
-    const desc = [`${i + 1}. ${b.lithology || ''}${b.thickness ? ' (' + b.thickness + ' m)' : ''}`, [b.color, b.grain, b.structures, b.fossils].map(t => String(t || '').trim()).filter(Boolean).join(', '), b.description, b.sample ? 'Sample: ' + b.sample : '']
+    const desc = [`${i + 1}. ${b.lithology || ''}${b.thickness ? ' (' + b.thickness + ' m)' : ''}`, [stripCode(b.color), b.grain, b.structures, b.fossils].map(t => String(t || '').trim()).filter(Boolean).join(', '), b.description, b.sample ? 'Sample: ' + b.sample : '']
       .filter(Boolean).flatMap((t, k) => wrapText(t, 46).map(line => ({ line, bold: k === 0 })));
     const maxLines = Math.max(1, Math.floor(h / 11));
     desc.slice(0, Math.max(maxLines, 1)).forEach((d, k) => {
