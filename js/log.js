@@ -351,7 +351,14 @@ export function bedName(b) {
 }
 
 // Two-colour beds: a main colour plus a second one, and how the two combine.
-export const COLOUR_MODES = ['grading upward to', 'varying to', 'mottled with', 'banded with'];
+// 'changing upward to': a sharp colour change inside one bed (e.g. the upper part more oxidised), at colorAt m above the base
+export const COLOUR_MODES = ['changing upward to', 'grading upward to', 'varying to', 'mottled with', 'banded with'];
+const COLOUR_MODE_LABEL = { 'changing upward to': 'Changes at a level', 'grading upward to': 'Grades up to', 'varying to': 'Varies to', 'mottled with': 'Mottled', 'banded with': 'Banded' };
+// where the colour changes, as a fraction of the bed height from the base
+function colourChangeAt(b) {
+  const th = Number(b.thickness) || 0, at = Number(b.colorAt);
+  return th > 0 && at > 0 ? Math.max(0.05, Math.min(0.95, at / th)) : 0.5;
+}
 function bedColours(b, fallback) {
   let c1 = colourHex(b.color), c2 = colourHex(b.color2), mode = b.color2 ? (b.colorMode || 'varying to') : '';
   // older mottled colours were saved as one text: "A (code) mottled with b (code)"
@@ -360,7 +367,7 @@ function bedColours(b, fallback) {
     c1 = colourHex(a); c2 = colourHex(z); mode = 'mottled with';
   }
   c1 = c1 || fallback;
-  return c2 && mode ? { c1, c2, mode } : { c1, c2: null, mode: '' };
+  return c2 && mode ? { c1, c2, mode, at: colourChangeAt(b) } : { c1, c2: null, mode: '' };
 }
 function mixHex(a, b) {
   const p = h => [1, 3, 5].map(k => parseInt(h.slice(k, k + 2), 16));
@@ -377,7 +384,12 @@ function colourFill(id, d, x, y, w, h, bc) {
     return `<linearGradient id="${id}" x1="0" y1="${up ? 1 : 0}" x2="${up ? 0 : 1}" y2="0"><stop offset="0" stop-color="${bc.c1}"/><stop offset="1" stop-color="${bc.c2}"/></linearGradient><path d="${d}" fill="url(#${id})"/>`;
   }
   let out = `<clipPath id="${id}"><path d="${d}"/></clipPath><g clip-path="url(#${id})"><rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${bc.c1}"/>`;
-  if (bc.mode === 'banded with') {
+  if (bc.mode === 'changing upward to') {
+    // lower colour below the change level, upper colour above it; a faint dotted line marks the change (not a bed boundary)
+    const yc = y + h * (1 - (bc.at || 0.5));
+    out += `<rect x="${x}" y="${y}" width="${w}" height="${(yc - y).toFixed(1)}" fill="${bc.c2}"/>`;
+    out += `<line x1="${x}" y1="${yc.toFixed(1)}" x2="${x + w}" y2="${yc.toFixed(1)}" stroke="#000" stroke-opacity=".45" stroke-width=".6" stroke-dasharray="1.5 1.5"/>`;
+  } else if (bc.mode === 'banded with') {
     const bh = Math.max(2, Math.min(5, h / 8));
     for (let yy = y + bh; yy < y + h; yy += bh * 2) out += `<rect x="${x}" y="${yy.toFixed(1)}" width="${w}" height="${bh.toFixed(1)}" fill="${bc.c2}"/>`;
   } else {
@@ -639,7 +651,14 @@ export function logSvg(st) {
   if (legendItems) {
     s += `<line x1="10" y1="${legendTop - 8}" x2="${W - 10}" y2="${legendTop - 8}" stroke="#ccc"/>
       <text x="10" y="${legendTop + 8}" font-size="11" font-weight="bold">Legend</text>`;
-    const items = [...liths.map(l => ['lith', l]), ...mods.map(m => ['mod', m]), ...syms.map(n => ['struct', n]), ...contacts.map(c => ['contact', c])];
+    // A–Z within each group (rocks, modifiers, structures, contacts); same rock in several colours stays together
+    const az = (a, b) => a.localeCompare(b, 'en', { sensitivity: 'base' });
+    const items = [
+      ...liths.slice().sort((a, b) => az(a.name, b.name) || az(a.key, b.key)).map(l => ['lith', l]),
+      ...mods.slice().sort(az).map(m => ['mod', m]),
+      ...syms.slice().sort(az).map(n => ['struct', n]),
+      ...contacts.slice().sort(az).map(c => ['contact', c]),
+    ];
     items.forEach(([kind, name], n) => {
       const x = 10 + (n % legendCols) * legendColW, yy = legendTop + 20 + Math.floor(n / legendCols) * 22;
       if (kind === 'lith') {
@@ -849,12 +868,16 @@ async function exportPdf(st) {
 }
 
 // One bed from two neighbours: the lower bed keeps its base (contact, base grain, formation),
-// the upper bed's rock becomes "interbedded with", and its grain/texture/colour become the top of the bed.
-export function mergeBeds(lo, up) {
+// and the upper bed's grain/texture/colour become the top of the bed.
+// opts.how: 'inter' = different rocks, the upper rock becomes "interbedded with";
+//           'same'  = same unit (e.g. one part more oxidised): one rock type, both colours kept.
+// opts.colour: how two different colours are drawn (a COLOUR_MODES value).
+export function mergeBeds(lo, up, opts = {}) {
+  const how = opts.how || 'inter', colourMode = opts.colour || 'grading upward to';
   const uniq = list => [...new Set(list.filter(Boolean))];
   const joinText = (a, b, sep) => uniq([a, b].map(x => String(x || '').trim())).join(sep);
   const lith = lo.lithology || up.lithology || '';
-  const inter = uniq([...(lo.inter || []), up.lithology, ...(up.inter || [])]).filter(n => n !== lith).slice(0, 2);
+  const inter = uniq([...(lo.inter || []), ...(how === 'inter' ? [up.lithology] : []), ...(up.inter || [])]).filter(n => n !== lith).slice(0, 2);
   const upTopGrain = up.grainTop || up.grain || '', upTopTex = up.textureTop || up.texture || '';
   const m = {
     ...lo,
@@ -871,11 +894,47 @@ export function mergeBeds(lo, up) {
     description: joinText(lo.description, up.description, '\n'),
     sample: joinText(lo.sample, up.sample, ', '),
     unit: lo.unit || up.unit || '',
+    // the two original beds, so the merge can be undone later ("Split back into 2 beds")
+    mergedFrom: JSON.parse(JSON.stringify([lo, up])),
   };
   if (!lo.color && up.color) m.color = up.color;
-  // different colours: shade from the lower colour up into the upper one (unless a second colour is already set)
-  else if (up.color && up.color !== lo.color && !lo.color2) { m.color2 = up.color; m.colorMode = 'grading upward to'; }
+  else if (up.color && up.color !== lo.color) {
+    // different colours: keep both, drawn the way the geologist chose
+    m.color = lo.color; m.color2 = up.color; m.colorMode = colourMode;
+    m.colorAt = colourMode === 'changing upward to' ? (Number(lo.thickness) || 0) : '';
+  }
   return m;
+}
+
+// Merge menu: how to join bed i with the bed above it
+function mergeDialog(st, i, lo) {
+  const beds = st.log.beds, up = beds[i + 1];
+  const sameRock = (lo.lithology || '') === (up.lithology || '');
+  const twoColours = !!(lo.color && up.color && lo.color !== up.color);
+  const line = (b, n) => `<div class="mv-bed"><span class="lp-sw small">${lithSwatch(b.lithology, 30, 24, colourHex(b.color))}</span>Bed ${n}: ${esc(b.lithology || 'Bed')} · ${esc(b.thickness)} m${b.color ? ' · ' + esc(stripCode(b.color)) : ''}</div>`;
+  ensureDefs();
+  const body = openModal('Merge beds', `
+    <div class="mv-list">${line(up, i + 2)}${line(lo, i + 1)}</div>
+    <div class="field"><label>How are they related?</label>
+      <label class="check small-check choice"><input type="radio" name="mg-how" value="same" ${sameRock ? 'checked' : ''}> Same unit, keep both colours (e.g. one part more oxidised)</label>
+      <label class="check small-check choice"><input type="radio" name="mg-how" value="inter" ${sameRock ? '' : 'checked'}> Different rocks, interbedded</label></div>
+    ${twoColours ? `<div class="field"><label>Show the two colours as</label><select id="mg-col">
+      <option value="changing upward to">Colour change at the same level</option>
+      <option value="grading upward to">Grading upward</option>
+      <option value="varying to">Varying</option>
+      <option value="mottled with">Mottled</option>
+      <option value="banded with">Banded</option></select>
+      <p class="muted" style="margin:6px 2px 0">Colour change: each colour stays where it was, with no bed boundary between them.</p></div>` : ''}
+    <div class="btns"><button class="btn primary" id="mg-go">Merge</button><button class="btn" id="mg-cancel">Cancel</button></div>`);
+  body.querySelector('#mg-cancel').onclick = () => { closeModal(); editBed(st, i); };
+  body.querySelector('#mg-go').onclick = async () => {
+    const how = body.querySelector('input[name="mg-how"]:checked').value;
+    const colour = twoColours ? body.querySelector('#mg-col').value : undefined;
+    beds[i] = mergeBeds(lo, up, { how, colour });
+    beds.splice(i + 1, 1);
+    await saveStation(st); closeModal(); renderLog();
+    toast(`Beds ${i + 1} and ${i + 2} merged: ${beds[i].thickness} m`);
+  };
 }
 
 function opts(list, val) {
@@ -927,9 +986,11 @@ function editBed(st, index) {
     <div class="field"><label>Colour</label>${colourFieldHtml('bd-color', b.color, 'id')}</div>
     <div class="grid2">
       <div class="field"><label>Second colour</label><select id="bd-cmode"><option value="">None</option>
-        ${COLOUR_MODES.map(m => `<option value="${m}" ${b.color2 && (b.colorMode || 'varying to') === m ? 'selected' : ''}>${{ 'grading upward to': 'Grades up to', 'varying to': 'Varies to', 'mottled with': 'Mottled', 'banded with': 'Banded' }[m]}</option>`).join('')}</select></div>
+        ${COLOUR_MODES.map(m => `<option value="${m}" ${b.color2 && (b.colorMode || 'varying to') === m ? 'selected' : ''}>${COLOUR_MODE_LABEL[m]}</option>`).join('')}</select></div>
       <div class="field" id="bd-color2-f"><label>&nbsp;</label>${colourFieldHtml('bd-color2', b.color2, 'id')}</div>
     </div>
+    <div class="field" id="bd-cat-f"><label>Colour changes at (m above the base of the bed)</label>
+      <input type="number" inputmode="decimal" step="any" id="bd-cat" value="${esc(b.colorAt || '')}" placeholder="middle of the bed"></div>
     <div class="field"><label>Sedimentary structures <span class="muted">(drawn in the log)</span></label>
       ${STRUCTURES.map(([g, list]) => `<div class="group-title" style="margin:6px 2px 4px">${g}</div><div class="mod-chips">
         ${list.map(([n, gl]) => `<button type="button" class="mod-chip struct-chip ${(b.structSyms || []).includes(n) ? 'on' : ''}" data-s="${esc(n)}"><svg width="22" height="16" viewBox="-11 -8 22 16">${gl}</svg>${esc(n)}</button>`).join('')}
@@ -939,11 +1000,14 @@ function editBed(st, index) {
     <div class="field"><label>Description</label><textarea id="bd-desc">${esc(b.description)}</textarea></div>
     <div class="field"><label>Sample no.</label><input type="text" id="bd-sample" value="${esc(b.sample)}"></div>
     <div class="btns"><button class="btn primary" id="bd-save">Save</button>
-      ${index != null ? `<button class="btn" id="bd-copy">Copy bed</button><button class="btn" id="bd-move">Move…</button>${index < beds.length - 1 ? '<button class="btn" id="bd-merge">Merge with bed above</button>' : ''}<button class="btn danger" id="bd-del">Delete</button>` : ''}</div>`);
+      ${index != null ? `<button class="btn" id="bd-copy">Copy bed</button><button class="btn" id="bd-move">Move…</button>${index < beds.length - 1 ? '<button class="btn" id="bd-merge">Merge with bed above</button>' : ''}${(b.mergedFrom || []).length === 2 ? '<button class="btn" id="bd-split">Split back into 2 beds</button>' : ''}<button class="btn danger" id="bd-del">Delete</button>` : ''}</div>`);
   const v = id => body.querySelector(id).value;
   body.querySelectorAll('.colour-field:not(.visual-field)').forEach(bindColourField);
   const cmode = body.querySelector('#bd-cmode');
-  const showC2 = () => { body.querySelector('#bd-color2-f').style.visibility = cmode.value ? '' : 'hidden'; };
+  const showC2 = () => {
+    body.querySelector('#bd-color2-f').style.visibility = cmode.value ? '' : 'hidden';
+    body.querySelector('#bd-cat-f').style.display = cmode.value === 'changing upward to' ? '' : 'none';
+  };
   cmode.addEventListener('change', showC2); showC2();
   body.querySelectorAll('.visual-field').forEach(bindVisualField);
   body.querySelectorAll('.mod-chip').forEach(c => c.onclick = () => c.classList.toggle('on')); // modifiers and structures
@@ -980,6 +1044,7 @@ function editBed(st, index) {
       unit: v('#bd-unit').trim(),
       colorMode: v('#bd-cmode'),
       color2: v('#bd-cmode') ? v('#bd-color2') : '',
+      colorAt: v('#bd-cmode') === 'changing upward to' && Number(v('#bd-cat')) > 0 ? Number(v('#bd-cat')) : '',
     });
     Object.assign(b, { thickness: th, formation: v('#bd-fm'), member: v('#bd-mbr'), contact: v('#bd-contact'), lithology: v('#bd-lith'), grain: v('#bd-grain'), shape: v('#bd-shape'), color: v('#bd-color'),
       structures: v('#bd-struct'), fossils: v('#bd-fossils'), description: v('#bd-desc'), sample: v('#bd-sample') });
@@ -1004,15 +1069,21 @@ function editBed(st, index) {
       beds[index] = b; await saveStation(st);
       moveBed(st, index);
     };
+    const splitBtn = body.querySelector('#bd-split');
+    if (splitBtn) splitBtn.onclick = async () => {
+      const [lo, up] = b.mergedFrom;
+      if (!(await confirmBox(`Split this bed back into the 2 beds it was made from (${lo.lithology || 'bed'} ${lo.thickness} m + ${up.lithology || 'bed'} ${up.thickness} m)? Changes made to it after merging are lost.`))) return;
+      beds.splice(index, 1, lo, up);
+      // a copied merged bed carries the same originals: give restored beds fresh ids if already used
+      for (const x of [lo, up]) if (beds.filter(y => y.id === x.id).length > 1) x.id = uid();
+      await saveStation(st); closeModal(); renderLog();
+      toast(`Split back into beds ${index + 1} and ${index + 2}`);
+    };
     const mergeBtn = body.querySelector('#bd-merge');
     if (mergeBtn) mergeBtn.onclick = async () => {
       if (!readForm()) return;
-      const up = beds[index + 1];
-      if (!(await confirmBox(`Merge bed ${index + 1} (${b.lithology || 'bed'}, ${b.thickness} m) with bed ${index + 2} above (${up.lithology || 'bed'}, ${up.thickness} m) into one bed?`))) return;
-      beds[index] = mergeBeds(b, up);
-      beds.splice(index + 1, 1);
-      await saveStation(st); closeModal(); renderLog();
-      toast(`Beds ${index + 1} and ${index + 2} merged: ${beds[index].thickness} m`);
+      beds[index] = b; await saveStation(st); // keep the edits made in this form
+      mergeDialog(st, index, b);
     };
     body.querySelector('#bd-del').onclick = async () => {
       if (!(await confirmBox('Delete this bed?'))) return;

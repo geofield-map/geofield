@@ -118,6 +118,7 @@ table.tbl th { color: var(--muted); font-weight: 500; font-size: 12px; }
 .mod-chip.on { border-color: var(--accent); background: #e8894a33; box-shadow: 0 0 0 1px var(--accent) inset; }
 .field label.small-check { justify-content: flex-start; gap: 8px; padding: 8px 0 0; font-size: 14px; color: var(--muted); }
 .field label.small-check input { width: 20px; height: 20px; flex: 0 0 auto; margin: 0; }
+.field label.small-check.choice { color: var(--text); font-size: 15px; padding: 10px 0 2px; align-items: center; }
 .mv-list { display: flex; flex-direction: column; gap: 4px; margin: 8px 0; }
 .mv-bed { display: flex; align-items: center; gap: 10px; padding: 8px 10px; background: var(--card, #1e2329); border-radius: 8px; font-size: 15px; }
 .mv-slot { display: block; width: 100%; text-align: left; padding: 9px 12px; border: 1px dashed #e8894a99; border-radius: 8px; background: transparent; color: #e8894a; font-size: 14px; font-family: inherit; cursor: pointer; }

@@ -54,6 +54,12 @@ export function structuresCsv() {
   }
   return toCsv(['Station', 'Latitude', 'Longitude', 'Easting', 'Northing', 'Type', 'Kind', 'Dip', 'Dip direction', 'Strike (RHR)', 'Plunge', 'Trend', 'Measure', 'Method', 'Note', 'Time'], rows);
 }
+// "changing upward to (at 2 m above base)", "mottled with", ... ; empty for one-colour beds
+function colourPattern(b) {
+  if (!b.color2) return '';
+  const mode = b.colorMode || 'varying to';
+  return mode === 'changing upward to' && b.colorAt ? `${mode} (at ${b.colorAt} m above base)` : mode;
+}
 export function logCsv() {
   const rows = [];
   for (const st of stations()) {
@@ -62,7 +68,7 @@ export function logCsv() {
     beds.forEach((b, i) => {
       const top = base + (Number(b.thickness) || 0);
       rows.push([st.code, i + 1, base, top, b.thickness, b.estimated ? 'yes' : '', b.formation, b.member, b.unit || '', b.lithology, (b.modifiers || []).join('; '), (b.inter || []).join('; '),
-        b.grain, b.grainTop || '', b.texture || '', b.textureTop || '', b.color, b.color2 ? b.colorMode || '' : '', b.color2 || '', [...(b.structSyms || []), b.structures].filter(Boolean).join('; '), b.fossils, b.contact, b.description, b.sample]);
+        b.grain, b.grainTop || '', b.texture || '', b.textureTop || '', b.color, colourPattern(b), b.color2 || '', [...(b.structSyms || []), b.structures].filter(Boolean).join('; '), b.fossils, b.contact, b.description, b.sample]);
       base = top;
     });
   }
@@ -293,7 +299,7 @@ async function geopackage() {
       const top = base + (Number(b.thickness) || 0);
       g.run('INSERT INTO log_beds (station, bed, base_m, top_m, thickness, estimated, formation, member, unit, lithology, modifiers, interbedded, grain, grain_top, texture, texture_top, colour, colour_pattern, colour2, structures, fossils, contact, description, sample) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
         [s.code, i + 1, base, top, Number(b.thickness) || 0, b.estimated ? 1 : 0, b.formation || '', b.member || '', b.unit || '', b.lithology || '', (b.modifiers || []).join('; '), (b.inter || []).join('; '),
-          b.grain || '', b.grainTop || '', b.texture || '', b.textureTop || '', b.color || '', b.color2 ? b.colorMode || '' : '', b.color2 || '', [...(b.structSyms || []), b.structures].filter(Boolean).join('; '), b.fossils || '', b.contact || '', b.description || '', b.sample || '']);
+          b.grain || '', b.grainTop || '', b.texture || '', b.textureTop || '', b.color || '', colourPattern(b), b.color2 || '', [...(b.structSyms || []), b.structures].filter(Boolean).join('; '), b.fossils || '', b.contact || '', b.description || '', b.sample || '']);
       base = top;
     });
   }
