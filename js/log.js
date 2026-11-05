@@ -517,6 +517,8 @@ export function logSvg(st) {
   const addLith = (name, bc) => {
     if (!name) return;
     const pat = patternFor(name); bc = bc || { c1: DEFAULT_FILL[pat], c2: null, mode: '' };
+    // shale and claystone share one symbol in the Saudi Aramco Lithology Key: one legend entry, named as there
+    if (pat === 'p-shale') name = 'Shale-Claystone';
     const key = [bc.c1, bc.c2, bc.mode].join('|');
     if (!liths.some(l => l.name === name && l.key === key)) liths.push({ name, pat, bc, key });
   };
