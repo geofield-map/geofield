@@ -493,9 +493,13 @@ export function logSvg(st) {
   const anyEstimated = beds.some(b => b.estimated);
   const syms = [...new Set(beds.flatMap(b => b.structSyms || []))].filter(n => STRUCT_GLYPH[n]);
   const legendItems = liths.length + contacts.length + mods.length + syms.length;
-  const hasCarb = beds.some(b => isCarbonate(b.lithology)), carbH = hasCarb ? 44 : 0; // room for the Dunham scale
-  const legendTop = Math.max(colBottom + 80 + carbH, textBottom + 24), legendRows = Math.ceil(legendItems / 2);
-  const H = legendItems ? legendTop + 24 + legendRows * 22 + 10 : colBottom + 75 + carbH;
+  const hasCarb = beds.some(b => isCarbonate(b.lithology));
+  // legend runs across the page in rows; the Dunham texture key sits under it
+  const legendCols = Math.max(2, Math.floor((W - 20) / 160)), legendColW = (W - 20) / legendCols;
+  const legendTop = Math.max(colBottom + 80, textBottom + 24), legendRows = Math.ceil(legendItems / legendCols);
+  const legendBottom = legendItems ? legendTop + 20 + legendRows * 22 : colBottom + 50;
+  const carbTop = legendBottom + 14;
+  const H = hasCarb ? carbTop + 56 : (legendItems ? legendBottom + 10 : colBottom + 75);
 
   const esc2 = s => esc(s);
   let s = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" font-family="Helvetica, Arial, sans-serif">${DEFS}
@@ -618,14 +622,15 @@ export function logSvg(st) {
   s += `<text x="${colX}" y="${base + 26}" font-size="9" fill="#555">Grain size · scale 1 m = ${pxPerM.toFixed(0)} px${anyEstimated ? ' · ~ = estimated thickness' : ''}</text>`;
   // second scale for carbonate beds: Dunham texture letters on the same width axis
   if (hasCarb) {
-    const dy = base + 44;
+    const dy = carbTop + 26;
+    s += `<text x="10" y="${carbTop + 8}" font-size="11" font-weight="bold">Carbonate texture (Dunham)</text>`;
     s += `<line x1="${colX}" y1="${dy}" x2="${end}" y2="${dy}" stroke="#000" stroke-width="1.2"/>`;
     const usesX = beds.some(b => isCarbonate(b.lithology) && (b.texture === 'Crystalline' || b.textureTop === 'Crystalline'));
     DUNHAM.filter(d => d[0] !== 'Crystalline' || usesX).forEach(([name, a, p]) => {
       const grey = name === 'Crystalline' ? ' fill="#777"' : '';
       s += `<line x1="${gx(p)}" y1="${dy}" x2="${gx(p)}" y2="${dy - 4}" stroke="#000"/><text x="${gx(p)}" y="${dy + 11}" font-size="${grey ? 8 : 9}" font-weight="bold" text-anchor="middle"${grey}>${a}</text>`;
     });
-    s += `<text x="${colX}" y="${dy + 25}" font-size="9" fill="#555">Carbonate texture: M mud · W wacke · P pack · G grain · F float · R rud · B boundstone${usesX ? ' · X crystalline' : ''}</text>`;
+    s += `<text x="${colX}" y="${dy + 25}" font-size="9" fill="#555">M mud · W wacke · P pack · G grain · F float · R rud · B boundstone${usesX ? ' · X crystalline' : ''}</text>`;
   }
 
   // legend
@@ -633,9 +638,8 @@ export function logSvg(st) {
     s += `<line x1="10" y1="${legendTop - 8}" x2="${W - 10}" y2="${legendTop - 8}" stroke="#ccc"/>
       <text x="10" y="${legendTop + 8}" font-size="11" font-weight="bold">Legend</text>`;
     const items = [...liths.map(l => ['lith', l]), ...mods.map(m => ['mod', m]), ...syms.map(n => ['struct', n]), ...contacts.map(c => ['contact', c])];
-    const colW = Math.min((W - 20) / 2, 175);
     items.forEach(([kind, name], n) => {
-      const x = 10 + (n % 2) * colW, yy = legendTop + 20 + Math.floor(n / 2) * 22;
+      const x = 10 + (n % legendCols) * legendColW, yy = legendTop + 20 + Math.floor(n / legendCols) * 22;
       if (kind === 'lith') {
         s += colourFill(`lg${n}`, `M${x} ${yy}h28v16h-28Z`, x, yy, 28, 16, name.bc);
         s += `<rect x="${x}" y="${yy}" width="28" height="16" fill="url(#${name.pat}${isDark(inkBase(name.bc)) ? '-l' : ''})" stroke="#000" stroke-width=".8"/>`;
