@@ -906,6 +906,62 @@ export function mergeBeds(lo, up, opts = {}) {
   return m;
 }
 
+// Cut any bed into a lower and an upper part (also for beds merged before merges were remembered).
+// A two-colour bed gives its first colour to the lower part and its second to the upper part;
+// an interbedded bed can give each part one of its rocks; a description on two lines is shared out.
+export function cutBed(b, lowerTh, lowerLith, upperLith) {
+  const th = Number(b.thickness) || 0;
+  const lo = JSON.parse(JSON.stringify(b)), up = JSON.parse(JSON.stringify(b));
+  delete lo.mergedFrom; delete up.mergedFrom;
+  up.id = uid();
+  lo.thickness = Math.round(lowerTh * 1000) / 1000;
+  up.thickness = Math.round((th - lowerTh) * 1000) / 1000;
+  lo.lithology = lowerLith || b.lithology; up.lithology = upperLith || b.lithology;
+  // different rocks chosen for the two parts: each part is now a single rock
+  if (!(lo.lithology === b.lithology && up.lithology === b.lithology)) { lo.inter = []; up.inter = []; }
+  // grain / texture: base of the bed stays with the lower part, the top with the upper part
+  lo.grainTop = ''; up.grain = b.grainTop || b.grain || ''; up.grainTop = '';
+  lo.textureTop = ''; up.texture = b.textureTop || b.texture || ''; up.textureTop = '';
+  if (b.color2) {
+    lo.color = b.color; up.color = b.color2;
+    for (const x of [lo, up]) { x.color2 = ''; x.colorMode = ''; x.colorAt = ''; }
+  }
+  up.contact = b.colorMode === 'changing upward to' || lo.lithology === up.lithology ? 'Gradational' : 'Sharp';
+  const lines = String(b.description || '').split(/\n+/).filter(t => t.trim());
+  if (lines.length >= 2) { lo.description = lines[0]; up.description = lines.slice(1).join('\n'); }
+  up.sample = '';
+  return [lo, up];
+}
+
+function splitDialog(st, i) {
+  const beds = st.log.beds, b = beds[i];
+  const th = Number(b.thickness) || 0;
+  const liths = [...new Set([b.lithology, ...(b.inter || [])].filter(Boolean))];
+  const defAt = b.colorMode === 'changing upward to' && Number(b.colorAt) > 0 ? Number(b.colorAt) : Math.round(th / 2 * 100) / 100;
+  const lithOpts = sel => liths.map(n => `<option ${n === sel ? 'selected' : ''}>${esc(n)}</option>`).join('');
+  const body = openModal('Split bed in two', `
+    <p class="muted">Bed ${i + 1}: <b>${esc(bedName(b))}</b> · ${esc(b.thickness)} m. It becomes a lower and an upper bed; everything else is copied to both, so you can then edit each one.</p>
+    <div class="field"><label>Thickness of the lower part (m)</label><input type="number" inputmode="decimal" step="any" id="sp-th" value="${defAt}"></div>
+    <p class="muted" id="sp-info"></p>
+    ${liths.length > 1 ? `<div class="grid2">
+      <div class="field"><label>Lower part rock</label><select id="sp-lo">${lithOpts(b.lithology)}</select></div>
+      <div class="field"><label>Upper part rock</label><select id="sp-up">${lithOpts(liths[1])}</select></div></div>` : ''}
+    ${b.color2 ? `<p class="muted">Colours: lower part ${esc(stripCode(b.color))}, upper part ${esc(stripCode(b.color2))}.</p>` : ''}
+    <div class="btns"><button class="btn primary" id="sp-go">Split</button><button class="btn" id="sp-cancel">Cancel</button></div>`);
+  const thIn = body.querySelector('#sp-th');
+  const info = () => { const x = Number(thIn.value); body.querySelector('#sp-info').textContent = x > 0 && x < th ? `Lower ${x} m + upper ${Math.round((th - x) * 1000) / 1000} m` : `Enter a value between 0 and ${th}`; };
+  thIn.addEventListener('input', info); info();
+  body.querySelector('#sp-cancel').onclick = () => { closeModal(); editBed(st, i); };
+  body.querySelector('#sp-go').onclick = async () => {
+    const x = Number(thIn.value);
+    if (!(x > 0 && x < th)) { toast(`Lower part must be between 0 and ${th} m`); return; }
+    const loL = body.querySelector('#sp-lo')?.value, upL = body.querySelector('#sp-up')?.value;
+    beds.splice(i, 1, ...cutBed(b, x, loL, upL));
+    await saveStation(st); closeModal(); renderLog();
+    toast(`Bed ${i + 1} split into beds ${i + 1} and ${i + 2}`);
+  };
+}
+
 // Merge menu: how to join bed i with the bed above it
 function mergeDialog(st, i, lo) {
   const beds = st.log.beds, up = beds[i + 1];
@@ -1000,7 +1056,7 @@ function editBed(st, index) {
     <div class="field"><label>Description</label><textarea id="bd-desc">${esc(b.description)}</textarea></div>
     <div class="field"><label>Sample no.</label><input type="text" id="bd-sample" value="${esc(b.sample)}"></div>
     <div class="btns"><button class="btn primary" id="bd-save">Save</button>
-      ${index != null ? `<button class="btn" id="bd-copy">Copy bed</button><button class="btn" id="bd-move">Move…</button>${index < beds.length - 1 ? '<button class="btn" id="bd-merge">Merge with bed above</button>' : ''}${(b.mergedFrom || []).length === 2 ? '<button class="btn" id="bd-split">Split back into 2 beds</button>' : ''}<button class="btn danger" id="bd-del">Delete</button>` : ''}</div>`);
+      ${index != null ? `<button class="btn" id="bd-copy">Copy bed</button><button class="btn" id="bd-move">Move…</button>${index < beds.length - 1 ? '<button class="btn" id="bd-merge">Merge with bed above</button>' : ''}${(b.mergedFrom || []).length === 2 ? '<button class="btn" id="bd-split">Split back into 2 beds</button>' : '<button class="btn" id="bd-cut">Split bed in two…</button>'}<button class="btn danger" id="bd-del">Delete</button>` : ''}</div>`);
   const v = id => body.querySelector(id).value;
   body.querySelectorAll('.colour-field:not(.visual-field)').forEach(bindColourField);
   const cmode = body.querySelector('#bd-cmode');
@@ -1078,6 +1134,12 @@ function editBed(st, index) {
       for (const x of [lo, up]) if (beds.filter(y => y.id === x.id).length > 1) x.id = uid();
       await saveStation(st); closeModal(); renderLog();
       toast(`Split back into beds ${index + 1} and ${index + 2}`);
+    };
+    const cutBtn = body.querySelector('#bd-cut');
+    if (cutBtn) cutBtn.onclick = async () => {
+      if (!readForm()) return;
+      beds[index] = b; await saveStation(st); // keep the edits made in this form
+      splitDialog(st, index);
     };
     const mergeBtn = body.querySelector('#bd-merge');
     if (mergeBtn) mergeBtn.onclick = async () => {
