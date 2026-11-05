@@ -475,19 +475,41 @@ export function logSvg(st) {
   const bedTop = {};
   { let yy = top; for (const i of order) { bedTop[i] = yy; yy += heights[i]; } }
 
-  // descriptions get all the lines they need; a block moves down when the one above is longer than its bed
-  const LH = 12, descBlocks = {};
-  let lastBottom = top - 12;
+  // Descriptions are centred on the middle of their bed. When neighbouring texts would overlap,
+  // they are grouped and the group is centred on its beds as a whole, so every text stays as
+  // close to its own bed as the space allows (classic label placement).
+  const LH = 12, GAP = 4, descBlocks = {};
+  const clusters = []; // { start, items: [{ i, h, ideal }] }
+  const clusterH = c => c.items.reduce((s, it) => s + it.h, 0) + GAP * (c.items.length - 1);
+  const place = (c, minStart) => {
+    let off = 0, sum = 0;
+    for (const it of c.items) { sum += it.ideal - off; off += it.h + GAP; }
+    c.start = Math.max(minStart, sum / c.items.length);
+  };
+  const minAfter = k => (k > 0 ? clusters[k - 1].start + clusterH(clusters[k - 1]) + GAP : top - 2);
   for (const i of order) {
     // only the geologist's own comment for the bed is written in the Description column
     const lines = String(beds[i].description || '').split(/\n+/).map(t => t.trim()).filter(Boolean)
       .flatMap(t => wrapText(t, 46).map(line => ({ line, first: true })));
-    if (!lines.length) { descBlocks[i] = { y0: bedTop[i] + 10, lines }; continue; }
-    const y0 = Math.max(bedTop[i] + 10, lastBottom + LH + 4);
-    descBlocks[i] = { y0, lines };
-    lastBottom = y0 + (lines.length - 1) * LH;
+    descBlocks[i] = { y0: bedTop[i] + 10, lines };
+    if (!lines.length) continue;
+    const h = lines.length * LH, mid = bedTop[i] + heights[i] / 2;
+    clusters.push({ items: [{ i, h, ideal: mid - h / 2 }] });
+    place(clusters[clusters.length - 1], minAfter(clusters.length - 1));
+    // overlapping the group above: join it and centre the joined group again
+    while (clusters.length > 1) {
+      const k = clusters.length - 1, prev = clusters[k - 1], cur = clusters[k];
+      if (cur.start >= prev.start + clusterH(prev) + GAP - 0.01) break;
+      prev.items.push(...cur.items); clusters.pop();
+      place(prev, minAfter(k - 1));
+    }
   }
-  const textBottom = lastBottom + 6;
+  let textBottom = top;
+  for (const c of clusters) {
+    let yy = c.start;
+    for (const it of c.items) { descBlocks[it.i].y0 = yy + 9; descBlocks[it.i].mid = bedTop[it.i] + heights[it.i] / 2; descBlocks[it.i].centre = yy + it.h / 2; yy += it.h + GAP; }
+    textBottom = yy;
+  }
 
   // legend entries: lithologies and contacts used in this log
   // one entry per lithology + colour, so the swatch matches the beds exactly
@@ -611,12 +633,13 @@ export function logSvg(st) {
     s += `<line x1="${colX - 14}" y1="${y}" x2="${colX - 10}" y2="${y}" stroke="#000"/><text x="${colX - 16}" y="${y + 4}" font-size="9" text-anchor="end">${approx}${(Math.round(cum * 100) / 100)}</text>`;
     cum -= Number(b.thickness) || 0;
     // description: the name line in normal weight, details a little lighter
-    const { y0, lines } = descBlocks[i];
+    const { y0, lines, mid, centre } = descBlocks[i];
     lines.forEach((d, k) => {
-      s += `<text x="${textX}" y="${y0 + k * LH}" font-size="10" fill="${d.first ? '#000' : '#333'}">${esc2(d.line)}</text>`;
+      s += `<text x="${textX}" y="${(y0 + k * LH).toFixed(1)}" font-size="10" fill="${d.first ? '#000' : '#333'}">${esc2(d.line)}</text>`;
     });
     s += `<line x1="${colX + wTop}" y1="${y}" x2="${textX - 4}" y2="${y}" stroke="#ccc" stroke-dasharray="2 2"/>`;
-    if (lines.length && y0 > y + 11) s += `<line x1="${textX - 4}" y1="${y}" x2="${textX - 1}" y2="${y0 - 8}" stroke="#bbb" stroke-width=".7"/>`;
+    // text that had to move away from its bed's middle: a thin leader points back to the bed
+    if (lines.length && Math.abs(centre - mid) > 5) s += `<line x1="${textX - 8}" y1="${mid.toFixed(1)}" x2="${textX - 2}" y2="${centre.toFixed(1)}" stroke="#999" stroke-width=".7"/>`;
     y += h;
   }
   s += `<line x1="${colX - 14}" y1="${y}" x2="${colX - 10}" y2="${y}" stroke="#000"/><text x="${colX - 16}" y="${y + 4}" font-size="9" text-anchor="end">0</text>`;
@@ -700,6 +723,7 @@ export function renderLog() {
   if (!st) { body.innerHTML = '<div class="empty">Create a station on the map first. Each log belongs to a station.</div>'; return; }
   state.currentStationId = st.id; sel.value = st.id;
   st.log = st.log || { beds: [] };
+  removeCycleLabels(st);
   const beds = st.log.beds;
   const total = beds.reduce((a, b) => a + (Number(b.thickness) || 0), 0);
   body.innerHTML = `
@@ -723,6 +747,21 @@ export function renderLog() {
     $('#lg-png').onclick = () => exportPng(st);
     $('#lg-pdf').onclick = () => exportPdf(st);
   }
+}
+
+// One-time clean-up, Nov 2026: the MM-COMPOSITE log was delivered with "Cycle 2." etc. at the start of
+// four descriptions; the geologist asked for them to go. Runs once per station, then never again.
+function removeCycleLabels(st) {
+  if (st.code !== 'MM-COMPOSITE' || st.log.cycleLabelsRemoved) return;
+  const strip = t => String(t || '').replace(/(^|\n)Cycle \d+( of \d+)?\.\s*([a-z]?)/g, (m, start, of, c) => start + c.toUpperCase());
+  const clean = b => {
+    if (b.description) b.description = strip(b.description);
+    if (b.notes) b.notes = strip(b.notes);
+    (b.mergedFrom || []).forEach(clean);
+  };
+  st.log.beds.forEach(clean);
+  st.log.cycleLabelsRemoved = true;
+  saveStation(st);
 }
 
 // tap = edit; press and hold (0.5 s) = move menu
@@ -912,7 +951,7 @@ export function mergeBeds(lo, up, opts = {}) {
 export function cutBed(b, lowerTh, lowerLith, upperLith) {
   const th = Number(b.thickness) || 0;
   const lo = JSON.parse(JSON.stringify(b)), up = JSON.parse(JSON.stringify(b));
-  delete lo.mergedFrom; delete up.mergedFrom;
+  delete lo.mergedFrom; delete up.mergedFrom; delete lo.notes; delete up.notes;
   up.id = uid();
   lo.thickness = Math.round(lowerTh * 1000) / 1000;
   up.thickness = Math.round((th - lowerTh) * 1000) / 1000;
@@ -962,6 +1001,53 @@ function splitDialog(st, i) {
   };
 }
 
+// Description for a merged bed: a summary built from the beds' data (rock, grain trend, colours,
+// structures), then the geologist's own notes from both beds without repeated sentences.
+// Works offline; the result is shown for editing before the merge.
+// sentences of a text, without end punctuation
+const sentencesOf = d => String(d || '').replace(/([.;!?])\s+/g, '$1\n').split(/\n+/).map(s => s.trim().replace(/[.;]+$/, '')).filter(Boolean);
+// the geologist's own notes for a bed: a merged bed keeps them apart from its generated summary
+const notesOf = b => (b.notes != null ? sentencesOf(b.notes) : sentencesOf(b.description));
+export function mergedDescription(lo, up, m) {
+  const lc = s => (s ? s.charAt(0).toLowerCase() + s.slice(1) : '');
+  const r2 = x => Math.round((Number(x) || 0) * 100) / 100;
+  const parts = [];
+  // rock: "Ferruginous, hematitic sandstone" or "Sandstone interbedded with siltstone"
+  const mods = (m.modifiers || []).map(lc);
+  let rock = (mods.length ? mods.join(', ') + ' ' + lc(m.lithology || 'bed') : (m.lithology || 'Bed'));
+  rock = rock.charAt(0).toUpperCase() + rock.slice(1);
+  if ((m.inter || []).length) rock += ' interbedded with ' + m.inter.map(lc).join(' and ');
+  parts.push(`${rock}, ${r2(m.thickness)} m`);
+  // grain or carbonate texture trend
+  const carb = isCarbonate(m.lithology) && m.texture;
+  const a = carb ? m.texture : m.grain, t = carb ? m.textureTop : m.grainTop;
+  if (a && t && a !== t) {
+    const finer = carb ? dunhamPos(t) < dunhamPos(a) : GRAINS.indexOf(t) < GRAINS.indexOf(a);
+    parts.push(carb ? `${lc(a)} passing upward into ${lc(t)}` : `${finer ? 'fining' : 'coarsening'} upward from ${lc(a)} to ${lc(t)}`);
+  } else if (a) parts.push(lc(a));
+  // colours
+  const c1 = lc(stripCode(m.color)), c2 = lc(stripCode(m.color2));
+  if (c1 && c2) {
+    const at = r2(m.colorAt), above = r2((Number(m.thickness) || 0) - at);
+    parts.push({
+      'changing upward to': at ? `${c1} in the lower ${at} m, ${c2} in the upper ${above} m` : `${c1} below, ${c2} above`,
+      'grading upward to': `${c1} grading upward into ${c2}`,
+      'varying to': `${c1} to ${c2}`,
+      'mottled with': `${c1} mottled ${c2}`,
+      'banded with': `${c1} with ${c2} bands`,
+    }[m.colorMode] || `${c1} and ${c2}`);
+  } else if (c1) parts.push(c1);
+  const syms = (m.structSyms || []).map(lc);
+  if (syms.length) parts.push(syms.join(', '));
+  let text = parts.join('; ') + '.';
+  // the geologist's notes: each sentence once, lower bed first
+  const seen = new Set(), keep = list => list.filter(s => { const k = s.toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; });
+  const loN = keep(notesOf(lo)), upN = keep(notesOf(up));
+  if (loN.length && upN.length) text += ` Lower part: ${loN.join('; ')}. Upper part: ${upN.join('; ')}.`;
+  else if (loN.length || upN.length) text += ' ' + [...loN, ...upN].join('; ') + '.';
+  return text;
+}
+
 // Merge menu: how to join bed i with the bed above it
 function mergeDialog(st, i, lo) {
   const beds = st.log.beds, up = beds[i + 1];
@@ -981,12 +1067,29 @@ function mergeDialog(st, i, lo) {
       <option value="mottled with">Mottled</option>
       <option value="banded with">Banded</option></select>
       <p class="muted" style="margin:6px 2px 0">Colour change: each colour stays where it was, with no bed boundary between them.</p></div>` : ''}
+    <div class="field"><label>Description of the merged bed</label>
+      <p class="muted" style="margin:0 2px 6px">A summary written from both beds. You can edit it.</p>
+      <textarea id="mg-desc" rows="6"></textarea>
+      <button type="button" class="btn small" id="mg-regen" style="margin-top:6px">Write the summary again</button></div>
     <div class="btns"><button class="btn primary" id="mg-go">Merge</button><button class="btn" id="mg-cancel">Cancel</button></div>`);
+  const choice = () => ({ how: body.querySelector('input[name="mg-how"]:checked').value, colour: twoColours ? body.querySelector('#mg-col').value : undefined });
+  const desc = body.querySelector('#mg-desc');
+  let edited = false;
+  const regen = () => { desc.value = mergedDescription(lo, up, mergeBeds(lo, up, choice())); edited = false; };
+  desc.addEventListener('input', () => { edited = true; });
+  // the summary follows the choices above until the geologist types in it
+  body.querySelectorAll('input[name="mg-how"], #mg-col').forEach(el => el.addEventListener('change', () => { if (!edited) regen(); }));
+  body.querySelector('#mg-regen').onclick = regen;
+  regen();
   body.querySelector('#mg-cancel').onclick = () => { closeModal(); editBed(st, i); };
   body.querySelector('#mg-go').onclick = async () => {
-    const how = body.querySelector('input[name="mg-how"]:checked').value;
-    const colour = twoColours ? body.querySelector('#mg-col').value : undefined;
-    beds[i] = mergeBeds(lo, up, { how, colour });
+    const m = mergeBeds(lo, up, choice());
+    const generated = new Set(sentencesOf(mergedDescription(lo, up, m)).map(s => s.toLowerCase()));
+    // raw notes of both beds, plus any sentence the geologist added in the box
+    const notes = [...notesOf(lo), ...notesOf(up), ...sentencesOf(desc.value).filter(s => !generated.has(s.toLowerCase()))];
+    m.notes = [...new Map(notes.map(s => [s.toLowerCase(), s])).values()].join('\n');
+    m.description = desc.value.trim();
+    beds[i] = m;
     beds.splice(i + 1, 1);
     await saveStation(st); closeModal(); renderLog();
     toast(`Beds ${i + 1} and ${i + 2} merged: ${beds[i].thickness} m`);
@@ -1102,6 +1205,12 @@ function editBed(st, index) {
       color2: v('#bd-cmode') ? v('#bd-color2') : '',
       colorAt: v('#bd-cmode') === 'changing upward to' && Number(v('#bd-cat')) > 0 ? Number(v('#bd-cat')) : '',
     });
+    // merged bed: sentences typed into its description are also kept in its own notes (used by a later merge)
+    if (b.notes != null && v('#bd-desc') !== b.description) {
+      const old = new Set(sentencesOf(b.description).map(s => s.toLowerCase())), have = new Set(sentencesOf(b.notes).map(s => s.toLowerCase()));
+      const added = sentencesOf(v('#bd-desc')).filter(s => !old.has(s.toLowerCase()) && !have.has(s.toLowerCase()));
+      if (added.length) b.notes = [b.notes, ...added].filter(Boolean).join('\n');
+    }
     Object.assign(b, { thickness: th, formation: v('#bd-fm'), member: v('#bd-mbr'), contact: v('#bd-contact'), lithology: v('#bd-lith'), grain: v('#bd-grain'), shape: v('#bd-shape'), color: v('#bd-color'),
       structures: v('#bd-struct'), fossils: v('#bd-fossils'), description: v('#bd-desc'), sample: v('#bd-sample') });
     return true;
