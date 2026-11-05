@@ -348,6 +348,48 @@ export function bedName(b) {
   return [main, ...mods].join(', ');
 }
 
+// Two-colour beds: a main colour plus a second one, and how the two combine.
+export const COLOUR_MODES = ['grading upward to', 'varying to', 'mottled with', 'banded with'];
+function bedColours(b, fallback) {
+  let c1 = colourHex(b.color), c2 = colourHex(b.color2), mode = b.color2 ? (b.colorMode || 'varying to') : '';
+  // older mottled colours were saved as one text: "A (code) mottled with b (code)"
+  if (!b.color2 && / mottled with /i.test(b.color || '')) {
+    const [a, z] = b.color.split(/ mottled with /i);
+    c1 = colourHex(a); c2 = colourHex(z); mode = 'mottled with';
+  }
+  c1 = c1 || fallback;
+  return c2 && mode ? { c1, c2, mode } : { c1, c2: null, mode: '' };
+}
+function mixHex(a, b) {
+  const p = h => [1, 3, 5].map(k => parseInt(h.slice(k, k + 2), 16));
+  const x = p(a), y = p(b);
+  return '#' + x.map((v, k) => Math.round((v + y[k]) / 2).toString(16).padStart(2, '0')).join('');
+}
+// colour of the symbols' background: decides dark or light symbol ink
+const inkBase = bc => (bc.c2 ? mixHex(bc.c1, bc.c2) : bc.c1);
+// fill for a bed outline d (box x,y,w,h): one colour, a gradient, mottles or bands
+function colourFill(id, d, x, y, w, h, bc) {
+  if (!bc.c2) return `<path d="${d}" fill="${bc.c1}"/>`;
+  if (bc.mode === 'grading upward to' || bc.mode === 'varying to') {
+    const up = bc.mode === 'grading upward to'; // base colour at the bottom, top colour at the top; a range runs left to right
+    return `<linearGradient id="${id}" x1="0" y1="${up ? 1 : 0}" x2="${up ? 0 : 1}" y2="0"><stop offset="0" stop-color="${bc.c1}"/><stop offset="1" stop-color="${bc.c2}"/></linearGradient><path d="${d}" fill="url(#${id})"/>`;
+  }
+  let out = `<clipPath id="${id}"><path d="${d}"/></clipPath><g clip-path="url(#${id})"><rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${bc.c1}"/>`;
+  if (bc.mode === 'banded with') {
+    const bh = Math.max(2, Math.min(5, h / 8));
+    for (let yy = y + bh; yy < y + h; yy += bh * 2) out += `<rect x="${x}" y="${yy.toFixed(1)}" width="${w}" height="${bh.toFixed(1)}" fill="${bc.c2}"/>`;
+  } else {
+    // mottles: the same scatter every time for the same bed
+    let seed = 0; for (const ch of id) seed = (seed * 31 + ch.charCodeAt(0)) >>> 0;
+    const rnd = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296);
+    const n = Math.max(3, Math.min(60, Math.round((w * h) / 110)));
+    for (let k = 0; k < n; k++) {
+      out += `<ellipse cx="${(x + rnd() * w).toFixed(1)}" cy="${(y + rnd() * h).toFixed(1)}" rx="${(2 + rnd() * 3).toFixed(1)}" ry="${(1.5 + rnd() * 2).toFixed(1)}" fill="${bc.c2}"/>`;
+    }
+  }
+  return out + '</g>';
+}
+
 function wrapText(text, maxChars) {
   const words = String(text || '').split(/\s+/); const lines = []; let cur = '';
   for (const w of words) { if ((cur + ' ' + w).trim().length > maxChars) { if (cur) lines.push(cur); cur = w; } else cur = (cur + ' ' + w).trim(); }
@@ -405,6 +447,8 @@ export function logSvg(st) {
     ...(hasUnits ? [['Formation', i => beds[i].formation || '', formationColour],
       // the key keeps equally named members of different formations apart
       ['Member', i => beds[i].member ? `${beds[i].member}\u0000${beds[i].formation || ''}` : '', white]] : []),
+    // informal units ("Lower Dolomite"), only when used
+    ...(beds.some(b => b.unit) ? [['Unit', i => beds[i].unit ? `${beds[i].unit}\u0000${beds[i].formation || ''}` : '', white]] : []),
   ];
   // a Structures column appears only when some bed has structure symbols, so older logs keep their layout
   const hasStructs = beds.some(b => (b.structSyms || []).some(n => STRUCT_GLYPH[n]));
@@ -434,13 +478,14 @@ export function logSvg(st) {
   // legend entries: lithologies and contacts used in this log
   // one entry per lithology + colour, so the swatch matches the beds exactly
   const liths = [];
-  const addLith = (name, fill) => {
+  const addLith = (name, bc) => {
     if (!name) return;
-    const pat = patternFor(name); fill = fill || DEFAULT_FILL[pat];
-    if (!liths.some(l => l.name === name && l.fill === fill)) liths.push({ name, pat, fill });
+    const pat = patternFor(name); bc = bc || { c1: DEFAULT_FILL[pat], c2: null, mode: '' };
+    const key = [bc.c1, bc.c2, bc.mode].join('|');
+    if (!liths.some(l => l.name === name && l.key === key)) liths.push({ name, pat, bc, key });
   };
   for (const b of beds.slice().reverse()) {
-    addLith(b.lithology, colourHex(b.color));
+    if (b.lithology) addLith(b.lithology, bedColours(b, DEFAULT_FILL[patternFor(b.lithology)]));
     (b.inter || []).forEach(n => addLith(n));
   }
   const contacts = [...new Set(beds.map(b => b.contact).filter(c => ['Erosional', 'Unconformity', 'Gradational', 'Faulted'].includes(c)))];
@@ -496,8 +541,8 @@ export function logSvg(st) {
     const topIdx = grainIndex(b, true);
     const wTop = topIdx >= 0 ? minW + stepW * topIdx : w; // fining / coarsening upward
     const pat = patternFor(b.lithology);
-    const fill = colourHex(b.color) || DEFAULT_FILL[pat];
-    const d = wTop !== w ? `M${colX} ${y}H${colX + wTop}L${colX + w} ${y + h}H${colX}Z` : bedPath(b.shape, colX, colX + w, y, h);
+    const bc = bedColours(b, DEFAULT_FILL[pat]), fill = bc.c1;
+    const d =wTop !== w ? `M${colX} ${y}H${colX + wTop}L${colX + w} ${y + h}H${colX}Z` : bedPath(b.shape, colX, colX + w, y, h);
     const inter = (b.inter || []).filter(Boolean);
     if (inter.length) {
       // interbedded: thin alternating stripes of each lithology, clipped to the bed outline
@@ -511,8 +556,8 @@ export function logSvg(st) {
       }
       s += `</g><path d="${d}" fill="none" stroke="#000" stroke-width="1"/>`;
     } else {
-      s += `<path d="${d}" fill="${fill}"/>`;
-      s += `<path d="${d}" fill="url(#${pat}${isDark(fill) ? '-l' : ''})" stroke="#000" stroke-width="1"/>`;
+      s += colourFill(`cf${i}`, d, colX, y, Math.max(w, wTop) + 12, h, bc);
+      s += `<path d="${d}" fill="url(#${pat}${isDark(inkBase(bc)) ? '-l' : ''})" stroke="#000" stroke-width="1"/>`;
     }
     // modifier symbols in a row across the middle of the bed
     const modsHere = (b.modifiers || []).filter(m => MOD_GLYPH[m]);
@@ -592,8 +637,8 @@ export function logSvg(st) {
     items.forEach(([kind, name], n) => {
       const x = 10 + (n % 2) * colW, yy = legendTop + 20 + Math.floor(n / 2) * 22;
       if (kind === 'lith') {
-        s += `<rect x="${x}" y="${yy}" width="28" height="16" fill="${name.fill}"/>
-          <rect x="${x}" y="${yy}" width="28" height="16" fill="url(#${name.pat}${isDark(name.fill) ? '-l' : ''})" stroke="#000" stroke-width=".8"/>`;
+        s += colourFill(`lg${n}`, `M${x} ${yy}h28v16h-28Z`, x, yy, 28, 16, name.bc);
+        s += `<rect x="${x}" y="${yy}" width="28" height="16" fill="url(#${name.pat}${isDark(inkBase(name.bc)) ? '-l' : ''})" stroke="#000" stroke-width=".8"/>`;
         s += `<text x="${x + 36}" y="${yy + 12}" font-size="10">${esc2(name.name)}</text>`;
         return;
       } else if (kind === 'struct') {
@@ -638,7 +683,7 @@ export function renderLog() {
       <div class="btns"><button class="btn primary" id="lg-add">+ Add bed on top</button><button class="btn" id="lg-open">Station data</button></div></div>
     ${beds.length ? `<div class="log-svg-wrap">${logSvg(st)}</div>
       <div class="card"><table class="tbl"><tr><th>#</th><th>Lithology</th><th>m</th><th>Grain / texture</th></tr>
-      ${beds.map((b, i) => ({ b, i })).reverse().map(({ b, i }) => `<tr data-i="${i}"><td>${i + 1}</td><td>${esc(b.lithology ? bedName(b) : '')}${b.formation ? `<div class="muted">${esc([b.formation, b.member].filter(Boolean).join(' / '))}</div>` : ''}</td><td>${b.estimated ? '~' : ''}${esc(b.thickness)}</td><td>${esc((isCarbonate(b.lithology) && b.texture ? [b.texture, b.textureTop] : [b.grain, b.grainTop]).filter(Boolean).join(' → '))}</td></tr>`).join('')}
+      ${beds.map((b, i) => ({ b, i })).reverse().map(({ b, i }) => `<tr data-i="${i}"><td>${i + 1}</td><td>${esc(b.lithology ? bedName(b) : '')}${b.formation || b.unit ? `<div class="muted">${esc([b.formation, b.member, b.unit].filter(Boolean).join(' / '))}</div>` : ''}</td><td>${b.estimated ? '~' : ''}${esc(b.thickness)}</td><td>${esc((isCarbonate(b.lithology) && b.texture ? [b.texture, b.textureTop] : [b.grain, b.grainTop]).filter(Boolean).join(' → '))}</td></tr>`).join('')}
       </table><p class="muted">Bed 1 is the base. Tap a bed to edit or copy it · press and hold a bed to move it.</p>
       <div class="btns"><button class="btn" id="lg-repeat">Repeat beds…</button></div>
       <div class="btns"><button class="btn" id="lg-svg">Export SVG</button><button class="btn" id="lg-png">Export PNG</button></div></div>`
@@ -771,14 +816,19 @@ function editBed(st, index) {
   const prev = index == null ? beds[beds.length - 1] : null;
   const b = index == null ? {
     id: uid(), thickness: '', lithology: prev ? prev.lithology : '', grain: '', color: '', structures: '', fossils: '', contact: 'Sharp', description: '', sample: '',
-    formation: prev ? prev.formation : (st.attrs.formation || ''), member: prev ? prev.member : (st.attrs.member || ''),
+    formation: prev ? prev.formation : (st.attrs.formation || ''), member: prev ? prev.member : (st.attrs.member || ''), unit: prev ? prev.unit || '' : '',
   } : { ...beds[index] };
+  // informal unit names already used in any log, offered as suggestions
+  const unitNames = [...new Set(state.stations.flatMap(s => ((s.log && s.log.beds) || []).map(x => x.unit)).filter(Boolean))].sort();
   const memberOpts = fmName => { const fm = findFormation(fmName); return opts(fm ? fm.members : [], b.member); };
   const body = openModal(index == null ? `New bed ${beds.length + 1}` : `Bed ${index + 1}`, `
     <div class="grid2">
       <div class="field"><label>Formation</label><select id="bd-fm">${opts(FORMATION_NAMES, b.formation)}</select></div>
       <div class="field"><label>Member</label><select id="bd-mbr">${memberOpts(b.formation)}</select></div>
     </div>
+    <div class="field"><label>Informal unit <span class="muted">(own name, e.g. Lower Dolomite)</span></label>
+      <input type="text" id="bd-unit" list="bd-unit-list" value="${esc(b.unit || '')}" autocomplete="off">
+      <datalist id="bd-unit-list">${unitNames.map(u => `<option value="${esc(u)}">`).join('')}</datalist></div>
     <div class="grid2">
       <div class="field"><label>Thickness (m)</label><input type="number" inputmode="decimal" step="any" id="bd-th" value="${esc(b.thickness)}">
         <label class="check small-check"><input type="checkbox" id="bd-est" ${b.estimated ? 'checked' : ''}> Estimated (~)</label></div>
@@ -803,6 +853,11 @@ function editBed(st, index) {
     <p class="muted" id="bd-trend" style="margin:-4px 0 8px"></p>
     <div class="field"><label>Shape in log</label>${visualFieldHtml('shape', 'bd-shape', b.shape)}</div>
     <div class="field"><label>Colour</label>${colourFieldHtml('bd-color', b.color, 'id')}</div>
+    <div class="grid2">
+      <div class="field"><label>Second colour</label><select id="bd-cmode"><option value="">None</option>
+        ${COLOUR_MODES.map(m => `<option value="${m}" ${b.color2 && (b.colorMode || 'varying to') === m ? 'selected' : ''}>${{ 'grading upward to': 'Grades up to', 'varying to': 'Varies to', 'mottled with': 'Mottled', 'banded with': 'Banded' }[m]}</option>`).join('')}</select></div>
+      <div class="field" id="bd-color2-f"><label>&nbsp;</label>${colourFieldHtml('bd-color2', b.color2, 'id')}</div>
+    </div>
     <div class="field"><label>Sedimentary structures <span class="muted">(drawn in the log)</span></label>
       ${STRUCTURES.map(([g, list]) => `<div class="group-title" style="margin:6px 2px 4px">${g}</div><div class="mod-chips">
         ${list.map(([n, gl]) => `<button type="button" class="mod-chip struct-chip ${(b.structSyms || []).includes(n) ? 'on' : ''}" data-s="${esc(n)}"><svg width="22" height="16" viewBox="-11 -8 22 16">${gl}</svg>${esc(n)}</button>`).join('')}
@@ -814,7 +869,10 @@ function editBed(st, index) {
     <div class="btns"><button class="btn primary" id="bd-save">Save</button>
       ${index != null ? '<button class="btn" id="bd-copy">Copy bed</button><button class="btn" id="bd-move">Move…</button><button class="btn danger" id="bd-del">Delete</button>' : ''}</div>`);
   const v = id => body.querySelector(id).value;
-  bindColourField(body.querySelector('.colour-field:not(.visual-field)'));
+  body.querySelectorAll('.colour-field:not(.visual-field)').forEach(bindColourField);
+  const cmode = body.querySelector('#bd-cmode');
+  const showC2 = () => { body.querySelector('#bd-color2-f').style.visibility = cmode.value ? '' : 'hidden'; };
+  cmode.addEventListener('change', showC2); showC2();
   body.querySelectorAll('.visual-field').forEach(bindVisualField);
   body.querySelectorAll('.mod-chip').forEach(c => c.onclick = () => c.classList.toggle('on')); // modifiers and structures
   // carbonates use Dunham texture instead of grain size
@@ -847,6 +905,9 @@ function editBed(st, index) {
       grainTop: v('#bd-grain-top'),
       texture: v('#bd-tex'),
       textureTop: v('#bd-tex-top'),
+      unit: v('#bd-unit').trim(),
+      colorMode: v('#bd-cmode'),
+      color2: v('#bd-cmode') ? v('#bd-color2') : '',
     });
     Object.assign(b, { thickness: th, formation: v('#bd-fm'), member: v('#bd-mbr'), contact: v('#bd-contact'), lithology: v('#bd-lith'), grain: v('#bd-grain'), shape: v('#bd-shape'), color: v('#bd-color'),
       structures: v('#bd-struct'), fossils: v('#bd-fossils'), description: v('#bd-desc'), sample: v('#bd-sample') });

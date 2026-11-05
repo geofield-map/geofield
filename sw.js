@@ -1,5 +1,5 @@
 // Offline support: keeps the app, its libraries and viewed map tiles on the phone.
-const VERSION = 'geofield-v16';
+const VERSION = 'geofield-v17';
 const TILE_CACHE = 'geofield-tiles';
 
 const APP_FILES = [

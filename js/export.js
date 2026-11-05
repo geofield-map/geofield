@@ -61,13 +61,13 @@ export function logCsv() {
     let base = 0;
     beds.forEach((b, i) => {
       const top = base + (Number(b.thickness) || 0);
-      rows.push([st.code, i + 1, base, top, b.thickness, b.estimated ? 'yes' : '', b.formation, b.member, b.lithology, (b.modifiers || []).join('; '), (b.inter || []).join('; '),
-        b.grain, b.grainTop || '', b.texture || '', b.textureTop || '', b.color, [...(b.structSyms || []), b.structures].filter(Boolean).join('; '), b.fossils, b.contact, b.description, b.sample]);
+      rows.push([st.code, i + 1, base, top, b.thickness, b.estimated ? 'yes' : '', b.formation, b.member, b.unit || '', b.lithology, (b.modifiers || []).join('; '), (b.inter || []).join('; '),
+        b.grain, b.grainTop || '', b.texture || '', b.textureTop || '', b.color, b.color2 ? b.colorMode || '' : '', b.color2 || '', [...(b.structSyms || []), b.structures].filter(Boolean).join('; '), b.fossils, b.contact, b.description, b.sample]);
       base = top;
     });
   }
-  return toCsv(['Station', 'Bed', 'Base (m)', 'Top (m)', 'Thickness (m)', 'Thickness estimated', 'Formation', 'Member', 'Lithology', 'Modifiers', 'Interbedded with',
-    'Grain size (base)', 'Grain size (top)', 'Carbonate texture (base)', 'Carbonate texture (top)', 'Colour', 'Structures', 'Fossils', 'Base contact', 'Description', 'Sample'], rows);
+  return toCsv(['Station', 'Bed', 'Base (m)', 'Top (m)', 'Thickness (m)', 'Thickness estimated', 'Formation', 'Member', 'Unit', 'Lithology', 'Modifiers', 'Interbedded with',
+    'Grain size (base)', 'Grain size (top)', 'Carbonate texture (base)', 'Carbonate texture (top)', 'Colour', 'Colour pattern', 'Second colour', 'Structures', 'Fossils', 'Base contact', 'Description', 'Sample'], rows);
 }
 
 // ---------- GeoJSON ----------
@@ -285,15 +285,15 @@ async function geopackage() {
     sr.map(({ s, m }) => ({ station: s.code, type: m.type, kind: m.kind, dip: m.dip, dip_dir: m.dipDir, strike: m.strike, plunge: m.plunge, trend: m.trend, measure: describe(m), note: m.note })),
     sr.map(({ s }) => gpGeom(s.lon, s.lat)));
 
-  g.run(`CREATE TABLE log_beds (id INTEGER PRIMARY KEY AUTOINCREMENT, station TEXT, bed INTEGER, base_m REAL, top_m REAL, thickness REAL, estimated INTEGER, formation TEXT, member TEXT, lithology TEXT, modifiers TEXT, interbedded TEXT, grain TEXT, grain_top TEXT, texture TEXT, texture_top TEXT, colour TEXT, structures TEXT, fossils TEXT, contact TEXT, description TEXT, sample TEXT)`);
+  g.run(`CREATE TABLE log_beds (id INTEGER PRIMARY KEY AUTOINCREMENT, station TEXT, bed INTEGER, base_m REAL, top_m REAL, thickness REAL, estimated INTEGER, formation TEXT, member TEXT, unit TEXT, lithology TEXT, modifiers TEXT, interbedded TEXT, grain TEXT, grain_top TEXT, texture TEXT, texture_top TEXT, colour TEXT, colour_pattern TEXT, colour2 TEXT, structures TEXT, fossils TEXT, contact TEXT, description TEXT, sample TEXT)`);
   g.run(`INSERT INTO gpkg_contents (table_name, data_type, identifier) VALUES ('log_beds', 'attributes', 'log_beds')`);
   for (const s of st) {
     let base = 0;
     ((s.log && s.log.beds) || []).forEach((b, i) => {
       const top = base + (Number(b.thickness) || 0);
-      g.run('INSERT INTO log_beds (station, bed, base_m, top_m, thickness, estimated, formation, member, lithology, modifiers, interbedded, grain, grain_top, texture, texture_top, colour, structures, fossils, contact, description, sample) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
-        [s.code, i + 1, base, top, Number(b.thickness) || 0, b.estimated ? 1 : 0, b.formation || '', b.member || '', b.lithology || '', (b.modifiers || []).join('; '), (b.inter || []).join('; '),
-          b.grain || '', b.grainTop || '', b.texture || '', b.textureTop || '', b.color || '', [...(b.structSyms || []), b.structures].filter(Boolean).join('; '), b.fossils || '', b.contact || '', b.description || '', b.sample || '']);
+      g.run('INSERT INTO log_beds (station, bed, base_m, top_m, thickness, estimated, formation, member, unit, lithology, modifiers, interbedded, grain, grain_top, texture, texture_top, colour, colour_pattern, colour2, structures, fossils, contact, description, sample) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+        [s.code, i + 1, base, top, Number(b.thickness) || 0, b.estimated ? 1 : 0, b.formation || '', b.member || '', b.unit || '', b.lithology || '', (b.modifiers || []).join('; '), (b.inter || []).join('; '),
+          b.grain || '', b.grainTop || '', b.texture || '', b.textureTop || '', b.color || '', b.color2 ? b.colorMode || '' : '', b.color2 || '', [...(b.structSyms || []), b.structures].filter(Boolean).join('; '), b.fossils || '', b.contact || '', b.description || '', b.sample || '']);
       base = top;
     });
   }
