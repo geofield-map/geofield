@@ -1,5 +1,5 @@
 // Offline support: keeps the app, its libraries and viewed map tiles on the phone.
-const VERSION = 'geofield-v18';
+const VERSION = 'geofield-v20';
 const TILE_CACHE = 'geofield-tiles';
 
 const APP_FILES = [
@@ -25,7 +25,8 @@ const TILE_HOSTS = ['server.arcgisonline.com', 'tile.opentopomap.org', 'tile.ope
 self.addEventListener('install', event => {
   event.waitUntil((async () => {
     const cache = await caches.open(VERSION);
-    await cache.addAll(APP_FILES);
+    // 'reload' skips the phone's HTTP cache, so an update never stores yesterday's files
+    await cache.addAll(APP_FILES.map(u => new Request(u, { cache: 'reload' })));
     // libraries one by one so a single CDN hiccup does not break installation
     await Promise.all(LIBS.map(u => cache.add(new Request(u, { mode: 'cors' })).catch(() => null)));
     self.skipWaiting();
@@ -63,7 +64,8 @@ self.addEventListener('fetch', event => {
     event.respondWith((async () => {
       const cache = await caches.open(VERSION);
       try {
-        const res = await fetch(req);
+        // 'no-cache' asks GitHub whether the file changed instead of trusting a 10-minute-old copy
+        const res = await fetch(req, { cache: 'no-cache' });
         if (res.ok) cache.put(req, res.clone());
         return res;
       } catch (e) {

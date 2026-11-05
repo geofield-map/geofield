@@ -301,7 +301,9 @@ export const MODIFIERS = [
 const MOD_GLYPH = Object.fromEntries(MODIFIERS);
 
 // Sedimentary structure symbols, drawn in their own column beside the lithology. Glyphs centred on 0,0, about 16 x 10 px.
-const SK = 'fill="none" stroke="#000" stroke-width="1"';
+// no stroke-width here: glyphs that set their own would repeat the attribute, which is invalid XML
+// (breaks PNG export and strict SVG readers); SVG's default width is already 1
+const SK = 'fill="none" stroke="#000"';
 export const STRUCTURES = [
   ['Lamination & bedding', [
     ['Parallel lamination', `<path d="M-8 -3.5H8M-8 0H8M-8 3.5H8" ${SK} stroke-width=".9"/>`],
