@@ -43,6 +43,10 @@ const nav = {
   openLog: id => { state.currentStationId = id; show('log'); },
   showOnMap: st => { show('map'); focusStation(st); },
   back: () => show(previous),
+  refreshTitle: () => {
+    const st = getStation(state.currentStationId);
+    if (current === 'station' && st) $('#title').textContent = st.code;
+  },
 };
 
 $$('#tabbar button').forEach(b => b.addEventListener('click', () => show(b.dataset.view)));

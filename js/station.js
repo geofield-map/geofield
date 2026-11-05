@@ -1,7 +1,7 @@
 // Station creation, the auto-filled form, and photos.
 import { state, saveProject, saveStation, deleteStation, getStation } from './state.js';
 import { db, uid } from './db.js';
-import { $, $$, esc, toast, openModal, closeModal, confirmBox, fmt } from './ui.js';
+import { $, $$, esc, toast, openModal, closeModal, confirmBox, fmt, resetViewport } from './ui.js';
 import { toUTM, toDMS } from './geo.js';
 import { LITHOLOGIES, ALL_LITHOLOGIES } from './schema.js';
 import { autofillFromLayers } from './layers.js';
@@ -146,7 +146,8 @@ function inputHtml(f, value, attrs) {
 function renderForm(st, body) {
   const schema = state.project.schema;
   let html = `<div class="card">
-    <div style="display:flex;align-items:center;gap:8px"><h3 style="flex:1;margin:0">${esc(st.code)}</h3><span class="badge" id="save-state">Saved</span></div>
+    <div style="display:flex;align-items:center;gap:8px"><h3 style="flex:1;margin:0">${esc(st.code)}</h3>
+      <button class="btn small" id="st-rename">Rename</button><span class="badge" id="save-state">Saved</span></div>
     <div class="kv" style="margin-top:8px">
       <div>UTM ${st.utmZone}N</div><div>E ${fmt(st.easting, 1)} · N ${fmt(st.northing, 1)}</div>
       <div>Lat/Long</div><div>${st.lat.toFixed(6)}, ${st.lon.toFixed(6)}</div>
@@ -210,6 +211,25 @@ function renderForm(st, body) {
   body.querySelectorAll('[data-key]').forEach(bind);
   body.querySelectorAll('.colour-field').forEach(bindColourField);
 
+  $('#st-rename').onclick = async () => {
+    const input = window.prompt('New station name', st.code);
+    resetViewport();
+    if (input == null) return;
+    const name = input.trim();
+    if (!name || name === st.code) return;
+    if (state.stations.some(s => s.id !== st.id && s.code.toLowerCase() === name.toLowerCase())) {
+      toast(`"${name}" is already used by another station`, 3500);
+      return;
+    }
+    const old = st.code;
+    st.code = name;
+    // form fields that are auto-filled with the station ID follow the new name
+    for (const f of state.project.schema) if (f.auto === 'station' && (st.attrs[f.key] === old || !st.attrs[f.key])) st.attrs[f.key] = name;
+    await saveStation(st);
+    nav.refreshTitle();
+    renderTab();
+    toast(`Renamed ${old} → ${name}`);
+  };
   $('#st-map').onclick = () => nav.showOnMap(st);
   $('#st-regps').onclick = async () => {
     if (!state.gps) { toast('No GPS fix'); return; }
