@@ -1009,6 +1009,34 @@ const sentencesOf = d => String(d || '').replace(/([.;!?])\s+/g, '$1\n').split(/
 // the geologist's own notes for a bed: a merged bed keeps them apart from its generated summary
 const notesOf = b => (b.notes != null ? sentencesOf(b.notes) : sentencesOf(b.description));
 export function mergedDescription(lo, up, m) {
+  let text = summaryLine(m);
+  // the geologist's notes: each sentence once, lower bed first
+  const seen = new Set(), keep = list => list.filter(s => { const k = s.toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; });
+  const loN = keep(notesOf(lo)), upN = keep(notesOf(up));
+  if (loN.length && upN.length) text += ` Lower part: ${loN.join('; ')}. Upper part: ${upN.join('; ')}.`;
+  else if (loN.length || upN.length) text += ' ' + [...loN, ...upN].join('; ') + '.';
+  return text;
+}
+
+// "Write summary" in the bed form: the summary sentence from the bed's data, then the geologist's notes.
+// A merged bed that remembers its two beds gets "Lower part / Upper part" notes. The bed's own notes are kept
+// apart (b.notes), so pressing the button again never puts the old summary inside the new one.
+export function bedSummary(b) {
+  const generated = new Set(sentencesOf(summaryLine(b)).map(s => s.toLowerCase()));
+  const own = notesOf(b).filter(s => !generated.has(s.toLowerCase()));
+  const [lo, up] = b.mergedFrom || [];
+  if (lo && up) {
+    const parts = new Set([...notesOf(lo), ...notesOf(up)].map(s => s.toLowerCase()));
+    const extra = own.filter(s => !parts.has(s.toLowerCase()));
+    b.notes = [...notesOf(lo), ...notesOf(up), ...extra].join('\n');
+    return mergedDescription(lo, up, b) + (extra.length ? ' ' + extra.join('; ') + '.' : '');
+  }
+  b.notes = own.join('\n');
+  return summaryLine(b) + (own.length ? ' ' + own.join('; ') + '.' : '');
+}
+
+// the opening sentence of a summary, written from the bed's data
+function summaryLine(m) {
   const lc = s => (s ? s.charAt(0).toLowerCase() + s.slice(1) : '');
   const r2 = x => Math.round((Number(x) || 0) * 100) / 100;
   const parts = [];
@@ -1039,13 +1067,7 @@ export function mergedDescription(lo, up, m) {
   } else if (c1) parts.push(c1);
   const syms = (m.structSyms || []).map(lc);
   if (syms.length) parts.push(syms.join(', '));
-  let text = parts.join('; ') + '.';
-  // the geologist's notes: each sentence once, lower bed first
-  const seen = new Set(), keep = list => list.filter(s => { const k = s.toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; });
-  const loN = keep(notesOf(lo)), upN = keep(notesOf(up));
-  if (loN.length && upN.length) text += ` Lower part: ${loN.join('; ')}. Upper part: ${upN.join('; ')}.`;
-  else if (loN.length || upN.length) text += ' ' + [...loN, ...upN].join('; ') + '.';
-  return text;
+  return parts.join('; ') + '.';
 }
 
 // Merge menu: how to join bed i with the bed above it
@@ -1156,7 +1178,8 @@ function editBed(st, index) {
       </div>`).join('')}</div>
     <div class="field"><label>Other structures / notes</label><input type="text" id="bd-struct" value="${esc(b.structures)}" placeholder="e.g. set thickness 20 cm, foresets dip 25° SE"></div>
     <div class="field"><label>Fossils</label><input type="text" id="bd-fossils" value="${esc(b.fossils)}"></div>
-    <div class="field"><label>Description</label><textarea id="bd-desc">${esc(b.description)}</textarea></div>
+    <div class="field"><label>Description</label><textarea id="bd-desc">${esc(b.description)}</textarea>
+      <button type="button" class="btn small" id="bd-summary" style="margin-top:6px">Write summary</button></div>
     <div class="field"><label>Sample no.</label><input type="text" id="bd-sample" value="${esc(b.sample)}"></div>
     <div class="btns"><button class="btn primary" id="bd-save">Save</button>
       ${index != null ? `<button class="btn" id="bd-copy">Copy bed</button><button class="btn" id="bd-move">Move…</button>${index < beds.length - 1 ? '<button class="btn" id="bd-merge">Merge with bed above</button>' : ''}${(b.mergedFrom || []).length === 2 ? '<button class="btn" id="bd-split">Split back into 2 beds</button>' : '<button class="btn" id="bd-cut">Split bed in two…</button>'}<button class="btn danger" id="bd-del">Delete</button>` : ''}</div>`);
@@ -1214,6 +1237,13 @@ function editBed(st, index) {
     Object.assign(b, { thickness: th, formation: v('#bd-fm'), member: v('#bd-mbr'), contact: v('#bd-contact'), lithology: v('#bd-lith'), grain: v('#bd-grain'), shape: v('#bd-shape'), color: v('#bd-color'),
       structures: v('#bd-struct'), fossils: v('#bd-fossils'), description: v('#bd-desc'), sample: v('#bd-sample') });
     return true;
+  };
+  // summary from the bed's current data and notes; shown in the box, saved only with Save
+  body.querySelector('#bd-summary').onclick = () => {
+    if (!readForm()) return;
+    const box = body.querySelector('#bd-desc');
+    box.value = bedSummary(b); b.description = box.value;
+    toast('Summary written. Edit it if needed, then Save');
   };
   body.querySelector('#bd-save').onclick = async () => {
     if (!readForm()) return;
