@@ -848,6 +848,36 @@ async function exportPdf(st) {
   await saveFile(doc.output('blob'), `${st.code}_log.pdf`);
 }
 
+// One bed from two neighbours: the lower bed keeps its base (contact, base grain, formation),
+// the upper bed's rock becomes "interbedded with", and its grain/texture/colour become the top of the bed.
+export function mergeBeds(lo, up) {
+  const uniq = list => [...new Set(list.filter(Boolean))];
+  const joinText = (a, b, sep) => uniq([a, b].map(x => String(x || '').trim())).join(sep);
+  const lith = lo.lithology || up.lithology || '';
+  const inter = uniq([...(lo.inter || []), up.lithology, ...(up.inter || [])]).filter(n => n !== lith).slice(0, 2);
+  const upTopGrain = up.grainTop || up.grain || '', upTopTex = up.textureTop || up.texture || '';
+  const m = {
+    ...lo,
+    thickness: Math.round(((Number(lo.thickness) || 0) + (Number(up.thickness) || 0)) * 1000) / 1000,
+    estimated: !!(lo.estimated || up.estimated),
+    lithology: lith,
+    inter,
+    modifiers: uniq([...(lo.modifiers || []), ...(up.modifiers || [])]),
+    structSyms: uniq([...(lo.structSyms || []), ...(up.structSyms || [])]),
+    grainTop: upTopGrain && upTopGrain !== lo.grain ? upTopGrain : (lo.grainTop || ''),
+    textureTop: upTopTex && upTopTex !== lo.texture ? upTopTex : (lo.textureTop || ''),
+    structures: joinText(lo.structures, up.structures, '; '),
+    fossils: joinText(lo.fossils, up.fossils, '; '),
+    description: joinText(lo.description, up.description, '\n'),
+    sample: joinText(lo.sample, up.sample, ', '),
+    unit: lo.unit || up.unit || '',
+  };
+  if (!lo.color && up.color) m.color = up.color;
+  // different colours: shade from the lower colour up into the upper one (unless a second colour is already set)
+  else if (up.color && up.color !== lo.color && !lo.color2) { m.color2 = up.color; m.colorMode = 'grading upward to'; }
+  return m;
+}
+
 function opts(list, val) {
   const extra = val && !list.includes(val) ? `<option selected>${esc(val)}</option>` : '';
   return `<option value=""></option>${extra}${list.map(o => `<option ${o === val ? 'selected' : ''}>${esc(o)}</option>`).join('')}`;
@@ -909,7 +939,7 @@ function editBed(st, index) {
     <div class="field"><label>Description</label><textarea id="bd-desc">${esc(b.description)}</textarea></div>
     <div class="field"><label>Sample no.</label><input type="text" id="bd-sample" value="${esc(b.sample)}"></div>
     <div class="btns"><button class="btn primary" id="bd-save">Save</button>
-      ${index != null ? '<button class="btn" id="bd-copy">Copy bed</button><button class="btn" id="bd-move">Move…</button><button class="btn danger" id="bd-del">Delete</button>' : ''}</div>`);
+      ${index != null ? `<button class="btn" id="bd-copy">Copy bed</button><button class="btn" id="bd-move">Move…</button>${index < beds.length - 1 ? '<button class="btn" id="bd-merge">Merge with bed above</button>' : ''}<button class="btn danger" id="bd-del">Delete</button>` : ''}</div>`);
   const v = id => body.querySelector(id).value;
   body.querySelectorAll('.colour-field:not(.visual-field)').forEach(bindColourField);
   const cmode = body.querySelector('#bd-cmode');
@@ -973,6 +1003,16 @@ function editBed(st, index) {
       if (!readForm()) return;
       beds[index] = b; await saveStation(st);
       moveBed(st, index);
+    };
+    const mergeBtn = body.querySelector('#bd-merge');
+    if (mergeBtn) mergeBtn.onclick = async () => {
+      if (!readForm()) return;
+      const up = beds[index + 1];
+      if (!(await confirmBox(`Merge bed ${index + 1} (${b.lithology || 'bed'}, ${b.thickness} m) with bed ${index + 2} above (${up.lithology || 'bed'}, ${up.thickness} m) into one bed?`))) return;
+      beds[index] = mergeBeds(b, up);
+      beds.splice(index + 1, 1);
+      await saveStation(st); closeModal(); renderLog();
+      toast(`Beds ${index + 1} and ${index + 2} merged: ${beds[index].thickness} m`);
     };
     body.querySelector('#bd-del').onclick = async () => {
       if (!(await confirmBox('Delete this bed?'))) return;
