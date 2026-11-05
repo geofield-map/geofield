@@ -127,8 +127,7 @@ function chip(value, code, name) {
     <span class="cp-txt"><span>${esc(name || value)}</span>${code ? `<small>${esc(code)}</small>` : ''}</span></button>`;
 }
 
-// chartFill: the lithology's colour in the Saudi Aramco chart's Lithology Key (used when no field colour is set)
-export async function pickColour(current, lithology, chartFill) {
+export async function pickColour(current, lithology) {
   const rec = await recent();
   const typical = typicalColours(lithology);
   if (!overlay) {
@@ -143,9 +142,6 @@ export async function pickColour(current, lithology, chartFill) {
       <button class="btn small" data-act="mottled">Mottled (2 colours)</button><button class="btn small danger" data-act="clear">Clear</button></div></div>
     <div class="cp-body">
       ${current ? `<div class="cp-group" data-fixed><div class="group-title">Current</div><div class="cp-grid">${chip(current)}</div></div>` : ''}
-      ${chartFill && lithology ? `<div class="cp-group" data-fixed><div class="group-title">Saudi Aramco chart colour</div><div class="cp-grid">
-        <button class="cp-chip" data-v=""><span class="cp-sw" style="background:${esc(chartFill)}"></span>
-        <span class="cp-txt"><span>Chart colour for ${esc(lithology)}</span><small>Lithology Key · no field colour</small></span></button></div></div>` : ''}
       ${typical ? `<div class="cp-group" data-fixed><div class="group-title">${esc(typical.title)}</div><div class="cp-grid">
         ${typical.chips.map(([code, name]) => chip(colourLabel(code, name), code, name)).join('')}</div></div>` : ''}
       ${rec.length ? `<div class="cp-group" data-fixed><div class="group-title">Recently used</div><div class="cp-grid">${rec.map(v => chip(v)).join('')}</div></div>` : ''}
@@ -213,10 +209,10 @@ export function colourFieldHtml(key, value, attr = 'data-key') {
 
 // Make a colour-field open the picker; fires 'input' on the hidden input after a choice.
 // lithologyOf (optional) returns the rock type, so the picker can show that rock's typical colours first.
-export function bindColourField(wrapper, lithologyOf, chartFillOf) {
+export function bindColourField(wrapper, lithologyOf) {
   const input = wrapper.querySelector('input');
   wrapper.addEventListener('click', async () => {
-    const v = await pickColour(input.value, lithologyOf ? lithologyOf() : '', chartFillOf ? chartFillOf() : '');
+    const v = await pickColour(input.value, lithologyOf ? lithologyOf() : '');
     if (v === undefined) return;
     input.value = v;
     const text = wrapper.querySelector('.cf-text');

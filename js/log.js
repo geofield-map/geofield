@@ -723,6 +723,7 @@ export function renderLog() {
   if (!st) { body.innerHTML = '<div class="empty">Create a station on the map first. Each log belongs to a station.</div>'; return; }
   state.currentStationId = st.id; sel.value = st.id;
   st.log = st.log || { beds: [] };
+  state.stations.forEach(useAramcoColours);
   removeCycleLabels(st);
   summariseOldMerges(st);
   const beds = st.log.beds;
@@ -762,6 +763,19 @@ function removeCycleLabels(st) {
   };
   st.log.beds.forEach(clean);
   st.log.cycleLabelsRemoved = true;
+  saveStation(st);
+}
+
+// One-time update, Nov 2026: beds now take the one Saudi Aramco colour of their lithology. Older beds that
+// still carry field colours (and second colours) are switched, once per station, as the geologist asked.
+function useAramcoColours(st) {
+  if (!st.log || !st.log.beds || !st.log.beds.length || st.log.aramcoColours) return;
+  const clear = b => {
+    b.color = ''; b.color2 = ''; b.colorMode = ''; b.colorAt = '';
+    (b.mergedFrom || []).forEach(clear);
+  };
+  st.log.beds.forEach(clear);
+  st.log.aramcoColours = true;
   saveStation(st);
 }
 
@@ -1185,7 +1199,9 @@ function editBed(st, index) {
     </div>
     <p class="muted" id="bd-trend" style="margin:-4px 0 8px"></p>
     <div class="field"><label>Shape in log</label>${visualFieldHtml('shape', 'bd-shape', b.shape)}</div>
-    <div class="field"><label>Colour</label>${colourFieldHtml('bd-color', b.color, 'id')}</div>
+    <div class="field"><label>Colour <span class="muted">(Saudi Aramco standard)</span></label>
+      <div class="colour-field aramco-field"><span class="cf-sw"></span><span class="cf-text"></span></div>
+      <input type="hidden" id="bd-color" value=""></div>
     <div class="grid2">
       <div class="field"><label>Second colour</label><select id="bd-cmode"><option value="">None</option>
         ${COLOUR_MODES.map(m => `<option value="${m}" ${b.color2 && (b.colorMode || 'varying to') === m ? 'selected' : ''}>${COLOUR_MODE_LABEL[m]}</option>`).join('')}</select></div>
@@ -1206,9 +1222,19 @@ function editBed(st, index) {
       ${index != null ? `<button class="btn" id="bd-copy">Copy bed</button><button class="btn" id="bd-move">Move…</button>${index < beds.length - 1 ? '<button class="btn" id="bd-merge">Merge with bed above</button>' : ''}${(b.mergedFrom || []).length === 2 ? '<button class="btn" id="bd-split">Split back into 2 beds</button>' : '<button class="btn" id="bd-cut">Split bed in two…</button>'}<button class="btn danger" id="bd-del">Delete</button>` : ''}</div>`);
   const v = id => body.querySelector(id).value;
   // the colour picker opens on the typical colours of the chosen lithology
-  // the main colour can also go back to the Aramco chart colour (no field colour: the log uses the Lithology Key fill)
-  body.querySelectorAll('.colour-field:not(.visual-field)').forEach(el => bindColourField(el, () => v('#bd-lith'),
-    el.querySelector('#bd-color') ? () => (v('#bd-lith') ? DEFAULT_FILL[patternFor(v('#bd-lith'))] : '') : null));
+  // second colour (oxidised part, mottles, bands…): picker opens on the typical colours of the lithology
+  body.querySelectorAll('.colour-field:not(.visual-field):not(.aramco-field)').forEach(el => bindColourField(el, () => v('#bd-lith')));
+  // main colour: always the Saudi Aramco Lithology Key colour of the chosen lithology (no field colour stored)
+  const aramco = body.querySelector('.aramco-field');
+  const showAramco = () => {
+    const l = v('#bd-lith');
+    aramco.querySelector('.cf-sw').style.cssText = l ? `background:${DEFAULT_FILL[patternFor(l)]}` : 'background:transparent;border-style:dashed';
+    const t = aramco.querySelector('.cf-text');
+    t.textContent = l ? `Saudi Aramco · ${l}` : 'Choose a lithology first';
+    t.classList.toggle('placeholder', !l);
+  };
+  body.querySelector('#bd-lith').addEventListener('change', showAramco);
+  showAramco();
   const cmode = body.querySelector('#bd-cmode');
   const showC2 = () => {
     body.querySelector('#bd-color2-f').style.visibility = cmode.value ? '' : 'hidden';
