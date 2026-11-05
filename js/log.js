@@ -211,23 +211,26 @@ function ensureDefs() {
 }
 
 // A button, not a text box: nothing takes keyboard focus (see resetViewport in ui.js).
-function visualFieldHtml(kind, id, value) {
+function visualFieldHtml(kind, id, value, placeholder) {
   ensureDefs();
   const cfg = pickerConfig(kind), shown = value || (kind === 'lith' ? '' : cfg.placeholder);
-  return `<button type="button" class="colour-field visual-field" data-kind="${kind}"><span class="lp-sw small">${shown ? cfg.swatch(shown, 30, 24) : ''}</span>
-    <span class="cf-text ${shown ? '' : 'placeholder'}">${esc(shown || cfg.placeholder)}</span>
+  const ph = placeholder || cfg.placeholder;
+  return `<button type="button" class="colour-field visual-field" data-kind="${kind}" data-ph="${esc(ph)}"><span class="lp-sw small">${shown ? cfg.swatch(shown, 30, 24) : ''}</span>
+    <span class="cf-text ${shown ? '' : 'placeholder'}">${esc(shown || ph)}</span>
     <input type="hidden" id="${id}" value="${esc(shown)}"></button>`;
 }
 function bindVisualField(wrapper) {
   const kind = wrapper.dataset.kind, cfg = pickerConfig(kind);
   const input = wrapper.querySelector('input');
+  const ph = wrapper.dataset.ph || cfg.placeholder;
   wrapper.addEventListener('click', async () => {
     let v = await pickVisual(kind, input.value);
     if (v === undefined) return;
     if (!v && kind !== 'lith') v = cfg.placeholder; // shape and contact always keep a value
     input.value = v;
+    input.dispatchEvent(new Event('change'));
     const text = wrapper.querySelector('.cf-text');
-    text.textContent = v || cfg.placeholder;
+    text.textContent = v || ph;
     text.classList.toggle('placeholder', !v);
     wrapper.querySelector('.lp-sw').innerHTML = v ? cfg.swatch(v, 30, 24) : '';
   });
@@ -239,7 +242,24 @@ function isDark(hex) {
   return lum < 105;
 }
 
-function grainIndex(bed) {
+// Carbonate texture (Dunham 1962, with Embry & Klovan 1971 for coarse carbonates).
+// [name, abbreviation, position on the width scale, in grain-size steps]
+export const DUNHAM = [
+  ['Mudstone', 'M', 1.5], ['Wackestone', 'W', 3], ['Packstone', 'P', 4.5], ['Grainstone', 'G', 6],
+  ['Floatstone', 'F', 7], ['Rudstone', 'R', 8], ['Boundstone', 'B', 9], ['Crystalline', 'X', 5.25],
+];
+const DUNHAM_NAMES = DUNHAM.map(d => d[0]);
+const dunhamPos = name => { const d = DUNHAM.find(x => x[0] === name); return d ? d[2] : -1; };
+const CARB_PATTERNS = ['p-limestone', 'p-dol-lime', 'p-arg-lime', 'p-calcarenite', 'p-calc-lime', 'p-wackestone', 'p-dolomite', 'p-arg-dol', 'p-marl'];
+export const isCarbonate = lith => CARB_PATTERNS.includes(patternFor(lith));
+
+// width position of a bed: Dunham texture for carbonates, grain size for everything else
+function grainIndex(bed, top = false) {
+  if (isCarbonate(bed.lithology)) {
+    const p = dunhamPos(top ? bed.textureTop : bed.texture);
+    if (p >= 0) return p;
+    if (top) return -1;
+  } else if (top) return GRAINS.indexOf(bed.grainTop);
   const i = GRAINS.indexOf(bed.grain);
   if (i >= 0) return i;
   // no grain size given: a sensible default width for the lithology
@@ -256,6 +276,76 @@ function grainIndex(bed) {
 // Also covers mottled colours, which carry a code after each name. The code stays in the saved data.
 function stripCode(text) {
   return String(text || '').replace(/\s*\((?:\d+(?:\.\d+)?\s*(?:YR|GY|BG|PB|RP|R|Y|G|B|P)\s+\d+(?:\.\d+)?\s*\/\s*\d+(?:\.\d+)?|N\s*\d+(?:\.\d+)?)\)/gi, '').trim();
+}
+
+// Lithology modifiers ("ferruginous sandstone"): each draws a small symbol scattered over the bed.
+// glyph markup is centred on 0,0 and about 8 px wide.
+export const MODIFIERS = [
+  ['Ferruginous', '<text y="2.6" font-size="7.5" font-weight="bold" text-anchor="middle" fill="#b3261e">Fe</text>'],
+  ['Hematitic', '<text y="2.6" font-size="7.5" font-weight="bold" text-anchor="middle" fill="#7a1010">He</text>'],
+  ['Glauconitic', '<circle cx="-2.2" cy="1" r="1.4" fill="#2e8b3a"/><circle cx="2.2" cy="1" r="1.4" fill="#2e8b3a"/><circle cx="0" cy="-2" r="1.4" fill="#2e8b3a"/>'],
+  ['Calcareous', '<path d="M-3.5 -2H3.5M0 -2V2.5" stroke="#000" stroke-width="1" fill="none"/>'],
+  ['Dolomitic', '<path d="M-3.5 -2H3.5M-1.2 -2L1.2 2.5" stroke="#000" stroke-width="1" fill="none"/>'],
+  ['Argillaceous', '<path d="M-3.5 0H3.5" stroke="#000" stroke-width="1.1"/>'],
+  ['Silty', '<path d="M-4 0H0" stroke="#000" stroke-width="1"/><circle cx="2" cy="0" r=".9"/><circle cx="4" cy="0" r=".9"/>'],
+  ['Sandy', '<circle cx="-2.5" cy="1.2" r=".9"/><circle cx="0" cy="-1.5" r=".9"/><circle cx="2.5" cy="1.2" r=".9"/>'],
+  ['Conglomeratic', '<ellipse cx="-1.5" cy="0" rx="2.4" ry="1.8" fill="none" stroke="#000" stroke-width=".9"/><circle cx="2.8" cy="1" r="1" fill="none" stroke="#000" stroke-width=".8"/>'],
+  ['Carbonaceous', '<path d="M-3.5 0H3.5" stroke="#000" stroke-width="2.2"/>'],
+  ['Gypsiferous', '<path d="M-2.5 -2L0 2L2.5 -2" stroke="#000" stroke-width="1" fill="none"/>'],
+  ['Cherty', '<path d="M-3 2.2L0 -2.5L3 2.2Z" fill="#000"/>'],
+  ['Fossiliferous', '<path d="M-3.5 -1A3.5 3.5 0 0 0 3.5 -1Z" fill="none" stroke="#000" stroke-width=".9"/><path d="M0 -1V2.3" stroke="#000" stroke-width=".6"/>'],
+  ['Silicified', '<text y="2.6" font-size="7" font-weight="bold" text-anchor="middle" fill="#334">Si</text>'],
+  ['Micaceous', '<path d="M-2.5 -2L2.5 2M-2.5 2L2.5 -2" stroke="#555" stroke-width=".9"/>'],
+  ['Friable', ''],
+];
+const MOD_GLYPH = Object.fromEntries(MODIFIERS);
+
+// Sedimentary structure symbols, drawn in their own column beside the lithology. Glyphs centred on 0,0, about 16 x 10 px.
+const SK = 'fill="none" stroke="#000" stroke-width="1"';
+export const STRUCTURES = [
+  ['Lamination & bedding', [
+    ['Parallel lamination', `<path d="M-8 -3.5H8M-8 0H8M-8 3.5H8" ${SK} stroke-width=".9"/>`],
+    ['Planar cross-bedding', `<path d="M-8 -4.5H8M-8 4.5H8M-7 4.5L-3 -4.5M-2 4.5L2 -4.5M3 4.5L7 -4.5" ${SK} stroke-width=".9"/>`],
+    ['Trough cross-bedding', `<path d="M-8 -4Q0 8 8 -4M-5 -4Q0 3.5 5 -4M-8 4.5H8" ${SK} stroke-width=".9"/>`],
+    ['Herringbone cross-bedding', `<path d="M-8 0H8M-7 0L-4 -4.5M-3 0L0 -4.5M1 0L4 -4.5M-4 0L-7 4.5M0 0L-3 4.5M4 0L1 4.5" ${SK} stroke-width=".9"/>`],
+    ['Hummocky cross-stratification', `<path d="M-8 1Q-4 -5 0 1T8 1M-8 4.5Q-4 -1.5 0 4.5T8 4.5" ${SK} stroke-width=".9"/>`],
+    ['Ripple lamination', `<path d="M-8 3C-7 -3 -4 -3 -3 3C-2 -3 1 -3 2 3C3 -3 6 -3 7 3" ${SK} stroke-width=".9"/><path d="M-6 0.5L-4.5 3M-1 0.5L0.5 3M4 0.5L5.5 3" ${SK} stroke-width=".6"/>`],
+    ['Flaser / lenticular bedding', `<path d="M-7 -1.5Q-4 -4.5 -1 -1.5Q-4 1.5 -7 -1.5M1 2Q4 -1 7 2Q4 5 1 2" ${SK} stroke-width=".9"/>`],
+    ['Graded bedding', `<path d="M-5 4.5H5L0 -4.5Z" ${SK}/><circle cx="0" cy="2.5" r=".8"/><circle cx="-2" cy="3" r=".7"/><circle cx="2" cy="3" r=".7"/>`],
+    ['Massive', `<text y="3.5" font-size="10" font-weight="bold" text-anchor="middle">M</text>`],
+  ]],
+  ['Soft-sediment & surfaces', [
+    ['Convolute / slump bedding', `<path d="M-8 2C-5 -7 -1 7 2 -2S7 -3 8 2" ${SK}/>`],
+    ['Load casts / flames', `<path d="M-8 -2Q-6 5 -4 -2Q-2 5 0 -2Q2 5 4 -2Q6 5 8 -2" ${SK}/>`],
+    ['Mud cracks', `<path d="M-8 -4H8M-6 -4L-4.5 4L-3 -4M1 -4L2.5 4L4 -4" ${SK}/>`],
+    ['Stylolites', `<path d="M-8 0l2 -3l2 3l2 -3l2 3l2 -3l2 3l2 -3l2 3" ${SK}/>`],
+    ['Imbrication', `<ellipse cx="-4" cy="0" rx="3.3" ry="1.6" transform="rotate(-25 -4 0)" ${SK} stroke-width=".9"/><ellipse cx="3.5" cy="0" rx="3.3" ry="1.6" transform="rotate(-25 3.5 0)" ${SK} stroke-width=".9"/>`],
+  ]],
+  ['Biogenic', [
+    ['Bioturbation', `<path d="M-6 4.5C-7 -1 -2 2 -3 -4.5M2 4.5C1 0 6 1 5 -4.5" ${SK}/>`],
+    ['Burrows', `<path d="M-3 -5V3M3 -5V3" ${SK}/><circle cx="-3" cy="3.8" r="1.2"/><circle cx="3" cy="3.8" r="1.2"/>`],
+    ['Root traces', `<path d="M0 -5V0M0 0L-4 5M0 0L4 5M0 0V5M0 -2L-2.5 0" ${SK}/>`],
+    ['Shell fragments', `<path d="M-7 -1A3 3 0 0 0 -1 -1Z M1 3A3 3 0 0 0 7 3Z" ${SK} stroke-width=".9"/>`],
+  ]],
+  ['Diagenetic & weathering', [
+    ['Concretions / nodules', `<ellipse cx="0" cy="0" rx="6" ry="3.8" ${SK}/>`],
+    ['Iron nodules', `<ellipse cx="-3" cy="0" rx="3.5" ry="2.6" fill="#8b2a12"/><ellipse cx="4.2" cy="1" rx="2.5" ry="1.9" fill="#8b2a12"/>`],
+    ['Iron banding / Liesegang', `<path d="M-8 4Q0 -8 8 4M-5 4Q0 -3 5 4M-2 4Q0 1 2 4" fill="none" stroke="#a0301a" stroke-width="1.1"/>`],
+    ['Mottling', `<circle cx="-4.5" cy="-1" r="2.6" fill="#a0522d" fill-opacity=".75"/><circle cx="2" cy="1.8" r="1.8" fill="#a0522d" fill-opacity=".75"/><circle cx="5.5" cy="-2.5" r="1.2" fill="#a0522d" fill-opacity=".75"/>`],
+    ['Bleaching / leaching', `<rect x="-7" y="-4" width="14" height="8" fill="#fff" stroke="#888" stroke-dasharray="1.5 1.2"/>`],
+  ]],
+];
+const STRUCT_GLYPH = Object.fromEntries(STRUCTURES.flatMap(g => g[1]));
+const structAt = (name, x, y, k = 1) => STRUCT_GLYPH[name]
+  ? `<g transform="translate(${x.toFixed(1)},${y.toFixed(1)}) scale(${k.toFixed(2)})">${STRUCT_GLYPH[name]}</g>` : '';
+const glyphAt = (name, x, y) => MOD_GLYPH[name]
+  ? `<g transform="translate(${x.toFixed(1)},${y.toFixed(1)})"><circle r="5" fill="#fff" fill-opacity=".8"/>${MOD_GLYPH[name]}</g>` : '';
+
+// "Sandstone / Siltstone, ferruginous, conglomeratic"
+export function bedName(b) {
+  const main = [b.lithology || 'Bed', ...(b.inter || []).filter(Boolean)].join(' / ');
+  const mods = (b.modifiers || []).map(m => m.toLowerCase());
+  return [main, ...mods].join(', ');
 }
 
 function wrapText(text, maxChars) {
@@ -316,7 +406,10 @@ export function logSvg(st) {
       // the key keeps equally named members of different formations apart
       ['Member', i => beds[i].member ? `${beds[i].member}\u0000${beds[i].formation || ''}` : '', white]] : []),
   ];
-  const colX = 2 + cols.length * 17 + 40, minW = 30, stepW = 13, textX = colX + minW + stepW * 10 + 20, W = textX + 280;
+  // a Structures column appears only when some bed has structure symbols, so older logs keep their layout
+  const hasStructs = beds.some(b => (b.structSyms || []).some(n => STRUCT_GLYPH[n]));
+  const structW = hasStructs ? 46 : 0;
+  const colX = 2 + cols.length * 17 + 40, minW = 30, stepW = 13, structX = colX + minW + stepW * 10 + 16, textX = structX + structW + (hasStructs ? 8 : 4), W = textX + 280;
   const heights = beds.map(b => Math.max(10, (Number(b.thickness) || 0) * pxPerM));
   const headTop = 30, headH = 62, top = headTop + headH + 14; // gap keeps the top depth label clear of the header
   const colBottom = top + heights.reduce((a, b) => a + b, 0);
@@ -341,16 +434,23 @@ export function logSvg(st) {
   // legend entries: lithologies and contacts used in this log
   // one entry per lithology + colour, so the swatch matches the beds exactly
   const liths = [];
+  const addLith = (name, fill) => {
+    if (!name) return;
+    const pat = patternFor(name); fill = fill || DEFAULT_FILL[pat];
+    if (!liths.some(l => l.name === name && l.fill === fill)) liths.push({ name, pat, fill });
+  };
   for (const b of beds.slice().reverse()) {
-    if (!b.lithology) continue;
-    const pat = patternFor(b.lithology), fill = colourHex(b.color) || DEFAULT_FILL[pat];
-    if (liths.some(l => l.name === b.lithology && l.fill === fill)) continue;
-    liths.push({ name: b.lithology, pat, fill });
+    addLith(b.lithology, colourHex(b.color));
+    (b.inter || []).forEach(n => addLith(n));
   }
   const contacts = [...new Set(beds.map(b => b.contact).filter(c => ['Erosional', 'Unconformity', 'Gradational', 'Faulted'].includes(c)))];
-  const legendItems = liths.length + contacts.length;
-  const legendTop = Math.max(colBottom + 80, textBottom + 24), legendRows = Math.ceil(legendItems / 2);
-  const H = legendItems ? legendTop + 24 + legendRows * 22 + 10 : colBottom + 75;
+  const mods = [...new Set(beds.flatMap(b => b.modifiers || []))].filter(m => MOD_GLYPH[m]);
+  const anyEstimated = beds.some(b => b.estimated);
+  const syms = [...new Set(beds.flatMap(b => b.structSyms || []))].filter(n => STRUCT_GLYPH[n]);
+  const legendItems = liths.length + contacts.length + mods.length + syms.length;
+  const hasCarb = beds.some(b => isCarbonate(b.lithology)), carbH = hasCarb ? 44 : 0; // room for the Dunham scale
+  const legendTop = Math.max(colBottom + 80 + carbH, textBottom + 24), legendRows = Math.ceil(legendItems / 2);
+  const H = legendItems ? legendTop + 24 + legendRows * 22 + 10 : colBottom + 75 + carbH;
 
   const esc2 = s => esc(s);
   let s = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" font-family="Helvetica, Arial, sans-serif">${DEFS}
@@ -368,7 +468,8 @@ export function logSvg(st) {
   cols.forEach(([label], c) => { s += headBox(2 + c * 17, 16, label, true); });
   const depthX = 2 + cols.length * 17;
   s += headBox(depthX + 2, colX - depthX - 6, 'm', false);
-  s += headBox(colX - 2, textX - colX - 4, 'Lithology', false);
+  s += headBox(colX - 2, (hasStructs ? structX : textX) - colX - 4, 'Lithology', false);
+  if (hasStructs) s += headBox(structX - 2, structW + 4, 'Structures', true);
   s += headBox(textX - 4, W - textX, 'Description', false);
 
   let y = top, cum = total;
@@ -392,11 +493,45 @@ export function logSvg(st) {
   for (const i of order) {
     const b = beds[i], h = heights[i];
     const w = minW + stepW * grainIndex(b);
+    const topIdx = grainIndex(b, true);
+    const wTop = topIdx >= 0 ? minW + stepW * topIdx : w; // fining / coarsening upward
     const pat = patternFor(b.lithology);
     const fill = colourHex(b.color) || DEFAULT_FILL[pat];
-    const d = bedPath(b.shape, colX, colX + w, y, h);
-    s += `<path d="${d}" fill="${fill}"/>`;
-    s += `<path d="${d}" fill="url(#${pat}${isDark(fill) ? '-l' : ''})" stroke="#000" stroke-width="1"/>`;
+    const d = wTop !== w ? `M${colX} ${y}H${colX + wTop}L${colX + w} ${y + h}H${colX}Z` : bedPath(b.shape, colX, colX + w, y, h);
+    const inter = (b.inter || []).filter(Boolean);
+    if (inter.length) {
+      // interbedded: thin alternating stripes of each lithology, clipped to the bed outline
+      const cid = `cb${i}`, lithsHere = [{ pat, fill }, ...inter.map(n => { const p = patternFor(n); return { pat: p, fill: DEFAULT_FILL[p] }; })];
+      const sh = Math.max(3, Math.min(8, h / 6));
+      s += `<clipPath id="${cid}"><path d="${d}"/></clipPath><g clip-path="url(#${cid})">`;
+      for (let yy = y, k = 0; yy < y + h; yy += sh, k++) {
+        const L = lithsHere[k % lithsHere.length], hh = Math.min(sh, y + h - yy) + 0.3;
+        s += `<rect x="${colX}" y="${yy}" width="${Math.max(w, wTop) + 12}" height="${hh}" fill="${L.fill}"/><rect x="${colX}" y="${yy}" width="${Math.max(w, wTop) + 12}" height="${hh}" fill="url(#${L.pat}${isDark(L.fill) ? '-l' : ''})"/>`;
+        if (yy > y) s += `<line x1="${colX}" y1="${yy}" x2="${colX + Math.max(w, wTop) + 12}" y2="${yy}" stroke="#000" stroke-opacity=".35" stroke-width=".5"/>`;
+      }
+      s += `</g><path d="${d}" fill="none" stroke="#000" stroke-width="1"/>`;
+    } else {
+      s += `<path d="${d}" fill="${fill}"/>`;
+      s += `<path d="${d}" fill="url(#${pat}${isDark(fill) ? '-l' : ''})" stroke="#000" stroke-width="1"/>`;
+    }
+    // modifier symbols in a row across the middle of the bed
+    const modsHere = (b.modifiers || []).filter(m => MOD_GLYPH[m]);
+    if (modsHere.length && h >= 7) {
+      const usable = Math.min(w, wTop) - 10, n = Math.max(1, Math.min(6, Math.floor(usable / 14)));
+      for (let k = 0; k < n; k++) s += glyphAt(modsHere[k % modsHere.length], colX + 6 + (usable * (k + 0.5)) / n, y + h / 2);
+    }
+    // structure symbols: two per row in the Structures column, centred on the bed, shrunk to fit thin beds
+    const symsHere = (b.structSyms || []).filter(n => STRUCT_GLYPH[n]);
+    if (symsHere.length) {
+      const rows = Math.ceil(symsHere.length / 2), rowH = Math.min(14, h / rows);
+      const k = Math.max(0.45, Math.min(1, rowH / 12));
+      symsHere.forEach((n, j) => {
+        const r = Math.floor(j / 2), inRow = Math.min(2, symsHere.length - r * 2);
+        const cx = structX + structW / 2 + (inRow === 2 ? (j % 2 ? 11 : -11) : 0);
+        const cy = y + h / 2 + (r - (rows - 1) / 2) * rowH;
+        s += structAt(n, cx, cy, k);
+      });
+    }
     // base contact
     const by = y + h;
     if (b.contact === 'Erosional' || b.contact === 'Unconformity') {
@@ -408,14 +543,16 @@ export function logSvg(st) {
       s += `<line x1="${colX - 4}" y1="${by + 3}" x2="${colX + w + 4}" y2="${by - 3}" stroke="#d00" stroke-width="2"/>`;
     }
     // scale tick at top of bed (height above base)
-    s += `<line x1="${colX - 14}" y1="${y}" x2="${colX - 10}" y2="${y}" stroke="#000"/><text x="${colX - 16}" y="${y + 4}" font-size="9" text-anchor="end">${(Math.round(cum * 100) / 100)}</text>`;
+    // "~" when this height depends on an estimated thickness (this bed or any below it)
+    const approx = beds.slice(0, i + 1).some(x => x.estimated) ? '~' : '';
+    s += `<line x1="${colX - 14}" y1="${y}" x2="${colX - 10}" y2="${y}" stroke="#000"/><text x="${colX - 16}" y="${y + 4}" font-size="9" text-anchor="end">${approx}${(Math.round(cum * 100) / 100)}</text>`;
     cum -= Number(b.thickness) || 0;
     // description: the name line in normal weight, details a little lighter
     const { y0, lines } = descBlocks[i];
     lines.forEach((d, k) => {
       s += `<text x="${textX}" y="${y0 + k * LH}" font-size="10" fill="${d.first ? '#000' : '#333'}">${esc2(d.line)}</text>`;
     });
-    s += `<line x1="${colX + w}" y1="${y}" x2="${textX - 4}" y2="${y}" stroke="#ccc" stroke-dasharray="2 2"/>`;
+    s += `<line x1="${colX + wTop}" y1="${y}" x2="${textX - 4}" y2="${y}" stroke="#ccc" stroke-dasharray="2 2"/>`;
     if (lines.length && y0 > y + 11) s += `<line x1="${textX - 4}" y1="${y}" x2="${textX - 1}" y2="${y0 - 8}" stroke="#bbb" stroke-width=".7"/>`;
     y += h;
   }
@@ -433,13 +570,24 @@ export function logSvg(st) {
   [['Clay', 0, 1], ['Silt', 1, 2], ['Sand', 2, 3], ['Gravel', 3, 4]].forEach(([name, a, b]) => {
     s += `<text x="${(steps[a][0] + steps[b][0]) / 2}" y="${base + 11}" font-size="9" text-anchor="middle">${name}</text>`;
   });
-  s += `<text x="${colX}" y="${base + 26}" font-size="9" fill="#555">Grain size · scale 1 m = ${pxPerM.toFixed(0)} px</text>`;
+  s += `<text x="${colX}" y="${base + 26}" font-size="9" fill="#555">Grain size · scale 1 m = ${pxPerM.toFixed(0)} px${anyEstimated ? ' · ~ = estimated thickness' : ''}</text>`;
+  // second scale for carbonate beds: Dunham texture letters on the same width axis
+  if (hasCarb) {
+    const dy = base + 44;
+    s += `<line x1="${colX}" y1="${dy}" x2="${end}" y2="${dy}" stroke="#000" stroke-width="1.2"/>`;
+    const usesX = beds.some(b => isCarbonate(b.lithology) && (b.texture === 'Crystalline' || b.textureTop === 'Crystalline'));
+    DUNHAM.filter(d => d[0] !== 'Crystalline' || usesX).forEach(([name, a, p]) => {
+      const grey = name === 'Crystalline' ? ' fill="#777"' : '';
+      s += `<line x1="${gx(p)}" y1="${dy}" x2="${gx(p)}" y2="${dy - 4}" stroke="#000"/><text x="${gx(p)}" y="${dy + 11}" font-size="${grey ? 8 : 9}" font-weight="bold" text-anchor="middle"${grey}>${a}</text>`;
+    });
+    s += `<text x="${colX}" y="${dy + 25}" font-size="9" fill="#555">Carbonate texture: M mud · W wacke · P pack · G grain · F float · R rud · B boundstone${usesX ? ' · X crystalline' : ''}</text>`;
+  }
 
   // legend
   if (legendItems) {
     s += `<line x1="10" y1="${legendTop - 8}" x2="${W - 10}" y2="${legendTop - 8}" stroke="#ccc"/>
       <text x="10" y="${legendTop + 8}" font-size="11" font-weight="bold">Legend</text>`;
-    const items = [...liths.map(l => ['lith', l]), ...contacts.map(c => ['contact', c])];
+    const items = [...liths.map(l => ['lith', l]), ...mods.map(m => ['mod', m]), ...syms.map(n => ['struct', n]), ...contacts.map(c => ['contact', c])];
     const colW = Math.min((W - 20) / 2, 175);
     items.forEach(([kind, name], n) => {
       const x = 10 + (n % 2) * colW, yy = legendTop + 20 + Math.floor(n / 2) * 22;
@@ -448,6 +596,10 @@ export function logSvg(st) {
           <rect x="${x}" y="${yy}" width="28" height="16" fill="url(#${name.pat}${isDark(name.fill) ? '-l' : ''})" stroke="#000" stroke-width=".8"/>`;
         s += `<text x="${x + 36}" y="${yy + 12}" font-size="10">${esc2(name.name)}</text>`;
         return;
+      } else if (kind === 'struct') {
+        s += `<rect x="${x}" y="${yy}" width="28" height="16" fill="#fff" stroke="#000" stroke-width=".8"/>${structAt(name, x + 14, yy + 8, 0.95)}`;
+      } else if (kind === 'mod') {
+        s += `<rect x="${x}" y="${yy}" width="28" height="16" fill="#fff" stroke="#000" stroke-width=".8"/>${glyphAt(name, x + 14, yy + 8)}`;
       } else if (name === 'Gradational') {
         s += `<line x1="${x}" y1="${yy + 8}" x2="${x + 28}" y2="${yy + 8}" stroke="#000" stroke-dasharray="4 3"/>`;
       } else if (name === 'Faulted') {
@@ -485,9 +637,10 @@ export function renderLog() {
       <div>Beds</div><div>${beds.length} · total ${Math.round(total * 100) / 100} m</div></div>
       <div class="btns"><button class="btn primary" id="lg-add">+ Add bed on top</button><button class="btn" id="lg-open">Station data</button></div></div>
     ${beds.length ? `<div class="log-svg-wrap">${logSvg(st)}</div>
-      <div class="card"><table class="tbl"><tr><th>#</th><th>Lithology</th><th>m</th><th>Grain</th></tr>
-      ${beds.map((b, i) => ({ b, i })).reverse().map(({ b, i }) => `<tr data-i="${i}"><td>${i + 1}</td><td>${esc(b.lithology || '')}${b.formation ? `<div class="muted">${esc([b.formation, b.member].filter(Boolean).join(' / '))}</div>` : ''}</td><td>${esc(b.thickness)}</td><td>${esc(b.grain || '')}</td></tr>`).join('')}
+      <div class="card"><table class="tbl"><tr><th>#</th><th>Lithology</th><th>m</th><th>Grain / texture</th></tr>
+      ${beds.map((b, i) => ({ b, i })).reverse().map(({ b, i }) => `<tr data-i="${i}"><td>${i + 1}</td><td>${esc(b.lithology ? bedName(b) : '')}${b.formation ? `<div class="muted">${esc([b.formation, b.member].filter(Boolean).join(' / '))}</div>` : ''}</td><td>${b.estimated ? '~' : ''}${esc(b.thickness)}</td><td>${esc((isCarbonate(b.lithology) && b.texture ? [b.texture, b.textureTop] : [b.grain, b.grainTop]).filter(Boolean).join(' → '))}</td></tr>`).join('')}
       </table><p class="muted">Bed 1 is the base. Tap a bed to edit or copy it · press and hold a bed to move it.</p>
+      <div class="btns"><button class="btn" id="lg-repeat">Repeat beds…</button></div>
       <div class="btns"><button class="btn" id="lg-svg">Export SVG</button><button class="btn" id="lg-png">Export PNG</button></div></div>`
     : '<div class="empty">No beds yet. Start from the base of the section and add beds upward.</div>'}`;
   $('#lg-add').onclick = () => editBed(st, null);
@@ -495,6 +648,7 @@ export function renderLog() {
   body.querySelectorAll('tr[data-i]').forEach(r => bindBedRow(r, st));
   const svgBtn = $('#lg-svg');
   if (svgBtn) {
+    $('#lg-repeat').onclick = () => repeatBeds(st);
     svgBtn.onclick = () => saveFile(new Blob([logSvg(st)], { type: 'image/svg+xml' }), `${st.code}_log.svg`);
     $('#lg-png').onclick = () => exportPng(st);
   }
@@ -521,6 +675,46 @@ function bindBedRow(row, st) {
 }
 
 const bedLabel = (b, n) => `${n}. ${b.lithology || 'Bed'}${b.thickness ? ' · ' + b.thickness + ' m' : ''}`;
+
+// Repeat a group of beds (a cycle) several times: copies go straight on top of the group.
+function repeatBeds(st) {
+  const beds = st.log.beds;
+  const optsFor = sel => beds.map((b, i) => `<option value="${i}" ${i === sel ? 'selected' : ''}>${esc(bedLabel(b, i + 1))}</option>`).reverse().join('');
+  const last = beds.length - 1;
+  const body = openModal('Repeat beds', `
+    <p class="muted">Log one cycle (e.g. sandstone → siltstone → claystone), then repeat it. The copies are added on top of the cycle.</p>
+    <div class="field"><label>Cycle starts at (lowest bed)</label><select id="rp-from">${optsFor(Math.max(0, last - 2))}</select></div>
+    <div class="field"><label>Cycle ends at (highest bed)</label><select id="rp-to">${optsFor(last)}</select></div>
+    <div class="field"><label>Total number of cycles (including this one)</label><input type="number" inputmode="numeric" id="rp-n" value="4" min="2" max="50"></div>
+    <p class="muted" id="rp-info"></p>
+    <div class="btns"><button class="btn primary" id="rp-go">Repeat</button><button class="btn" id="rp-cancel">Cancel</button></div>`);
+  const read = () => {
+    let a = Number(body.querySelector('#rp-from').value), b = Number(body.querySelector('#rp-to').value);
+    if (a > b) [a, b] = [b, a];
+    const n = Math.round(Number(body.querySelector('#rp-n').value));
+    return { a, b, n };
+  };
+  const info = () => {
+    const { a, b, n } = read();
+    const th = beds.slice(a, b + 1).reduce((s, x) => s + (Number(x.thickness) || 0), 0);
+    body.querySelector('#rp-info').textContent = n >= 2
+      ? `Cycle = beds ${a + 1}–${b + 1} (${b - a + 1} beds, ${Math.round(th * 100) / 100} m). Adds ${(n - 1) * (b - a + 1)} beds, ${Math.round(th * (n - 1) * 100) / 100} m.`
+      : 'Enter at least 2 cycles.';
+  };
+  body.querySelectorAll('select, input').forEach(el => el.addEventListener('input', info));
+  info();
+  body.querySelector('#rp-cancel').onclick = closeModal;
+  body.querySelector('#rp-go').onclick = async () => {
+    const { a, b, n } = read();
+    if (!(n >= 2 && n <= 50)) { toast('Enter between 2 and 50 cycles'); return; }
+    const group = beds.slice(a, b + 1);
+    const copies = [];
+    for (let k = 1; k < n; k++) for (const x of group) copies.push({ ...x, id: uid(), sample: '', modifiers: [...(x.modifiers || [])], inter: [...(x.inter || [])], structSyms: [...(x.structSyms || [])] });
+    beds.splice(b + 1, 0, ...copies);
+    await saveStation(st); closeModal(); renderLog();
+    toast(`Added ${copies.length} beds (${n} cycles)`);
+  };
+}
 
 // choose where a bed goes: top, base, or between two other beds
 function moveBed(st, from, title) {
@@ -586,16 +780,34 @@ function editBed(st, index) {
       <div class="field"><label>Member</label><select id="bd-mbr">${memberOpts(b.formation)}</select></div>
     </div>
     <div class="grid2">
-      <div class="field"><label>Thickness (m)</label><input type="number" inputmode="decimal" step="any" id="bd-th" value="${esc(b.thickness)}"></div>
+      <div class="field"><label>Thickness (m)</label><input type="number" inputmode="decimal" step="any" id="bd-th" value="${esc(b.thickness)}">
+        <label class="check small-check"><input type="checkbox" id="bd-est" ${b.estimated ? 'checked' : ''}> Estimated (~)</label></div>
       <div class="field"><label>Base contact</label>${visualFieldHtml('contact', 'bd-contact', b.contact)}</div>
     </div>
     <div class="field"><label>Lithology</label>${visualFieldHtml('lith', 'bd-lith', b.lithology)}</div>
+    <div class="field"><label>Modifiers <span class="muted">(tap all that apply)</span></label><div class="mod-chips" id="bd-mods">
+      ${MODIFIERS.map(([m, g]) => `<button type="button" class="mod-chip ${(b.modifiers || []).includes(m) ? 'on' : ''}" data-m="${m}">${g ? `<svg width="16" height="14" viewBox="-8 -7 16 14">${g}</svg>` : ''}${m}</button>`).join('')}
+    </div></div>
     <div class="grid2">
-      <div class="field"><label>Grain size</label><select id="bd-grain">${opts(GRAINS, b.grain)}</select></div>
-      <div class="field"><label>Shape in log</label>${visualFieldHtml('shape', 'bd-shape', b.shape)}</div>
+      <div class="field"><label>Interbedded with</label>${visualFieldHtml('lith', 'bd-inter1', (b.inter || [])[0], 'None')}</div>
+      <div class="field"><label>and</label>${visualFieldHtml('lith', 'bd-inter2', (b.inter || [])[1], 'None')}</div>
     </div>
+    <div class="grid2" id="bd-clastic-row">
+      <div class="field"><label>Grain size (base)</label><select id="bd-grain">${opts(GRAINS, b.grain)}</select></div>
+      <div class="field"><label>Grain at top</label><select id="bd-grain-top">${opts(GRAINS, b.grainTop).replace('<option value=""></option>', '<option value="">Same as base</option>')}</select></div>
+    </div>
+    <div class="grid2" id="bd-carb-row">
+      <div class="field"><label>Texture (Dunham)</label><select id="bd-tex">${opts(DUNHAM_NAMES, b.texture)}</select></div>
+      <div class="field"><label>Texture at top</label><select id="bd-tex-top">${opts(DUNHAM_NAMES, b.textureTop).replace('<option value=""></option>', '<option value="">Same as base</option>')}</select></div>
+    </div>
+    <p class="muted" id="bd-trend" style="margin:-4px 0 8px"></p>
+    <div class="field"><label>Shape in log</label>${visualFieldHtml('shape', 'bd-shape', b.shape)}</div>
     <div class="field"><label>Colour</label>${colourFieldHtml('bd-color', b.color, 'id')}</div>
-    <div class="field"><label>Sedimentary structures</label><input type="text" id="bd-struct" value="${esc(b.structures)}" placeholder="e.g. Trough cross-bedding"></div>
+    <div class="field"><label>Sedimentary structures <span class="muted">(drawn in the log)</span></label>
+      ${STRUCTURES.map(([g, list]) => `<div class="group-title" style="margin:6px 2px 4px">${g}</div><div class="mod-chips">
+        ${list.map(([n, gl]) => `<button type="button" class="mod-chip struct-chip ${(b.structSyms || []).includes(n) ? 'on' : ''}" data-s="${esc(n)}"><svg width="22" height="16" viewBox="-11 -8 22 16">${gl}</svg>${esc(n)}</button>`).join('')}
+      </div>`).join('')}</div>
+    <div class="field"><label>Other structures / notes</label><input type="text" id="bd-struct" value="${esc(b.structures)}" placeholder="e.g. set thickness 20 cm, foresets dip 25° SE"></div>
     <div class="field"><label>Fossils</label><input type="text" id="bd-fossils" value="${esc(b.fossils)}"></div>
     <div class="field"><label>Description</label><textarea id="bd-desc">${esc(b.description)}</textarea></div>
     <div class="field"><label>Sample no.</label><input type="text" id="bd-sample" value="${esc(b.sample)}"></div>
@@ -604,11 +816,38 @@ function editBed(st, index) {
   const v = id => body.querySelector(id).value;
   bindColourField(body.querySelector('.colour-field:not(.visual-field)'));
   body.querySelectorAll('.visual-field').forEach(bindVisualField);
+  body.querySelectorAll('.mod-chip').forEach(c => c.onclick = () => c.classList.toggle('on')); // modifiers and structures
+  // carbonates use Dunham texture instead of grain size
+  const trend = () => {
+    const carb = isCarbonate(v('#bd-lith'));
+    body.querySelector('#bd-clastic-row').style.display = carb ? 'none' : '';
+    body.querySelector('#bd-carb-row').style.display = carb ? '' : 'none';
+    let msg = '';
+    if (carb) {
+      const a = dunhamPos(v('#bd-tex')), t = dunhamPos(v('#bd-tex-top'));
+      if (a >= 0 && t >= 0 && a !== t) msg = t > a ? '↑ More grain-supported upward (shoaling-upward)' : '↑ More mud-supported upward (deepening-upward)';
+    } else {
+      const a = GRAINS.indexOf(v('#bd-grain')), t = GRAINS.indexOf(v('#bd-grain-top'));
+      if (a >= 0 && t >= 0 && a !== t) msg = t < a ? '↑ Fining upward' : '↑ Coarsening upward';
+    }
+    body.querySelector('#bd-trend').textContent = msg;
+  };
+  ['#bd-grain', '#bd-grain-top', '#bd-tex', '#bd-tex-top', '#bd-lith'].forEach(id => body.querySelector(id).addEventListener('change', trend));
+  trend();
   body.querySelector('#bd-fm').onchange = e => { b.member = ''; body.querySelector('#bd-mbr').innerHTML = memberOpts(e.target.value); };
   // reads the form into the bed; false when the thickness is missing
   const readForm = () => {
     const th = Number(v('#bd-th'));
     if (!th || th <= 0) { toast('Enter a thickness in metres'); return false; }
+    Object.assign(b, {
+      estimated: body.querySelector('#bd-est').checked,
+      modifiers: [...body.querySelectorAll('.mod-chip.on[data-m]')].map(c => c.dataset.m),
+      structSyms: [...body.querySelectorAll('.struct-chip.on')].map(c => c.dataset.s),
+      inter: [v('#bd-inter1'), v('#bd-inter2')].filter(Boolean),
+      grainTop: v('#bd-grain-top'),
+      texture: v('#bd-tex'),
+      textureTop: v('#bd-tex-top'),
+    });
     Object.assign(b, { thickness: th, formation: v('#bd-fm'), member: v('#bd-mbr'), contact: v('#bd-contact'), lithology: v('#bd-lith'), grain: v('#bd-grain'), shape: v('#bd-shape'), color: v('#bd-color'),
       structures: v('#bd-struct'), fossils: v('#bd-fossils'), description: v('#bd-desc'), sample: v('#bd-sample') });
     return true;
@@ -623,7 +862,7 @@ function editBed(st, index) {
     body.querySelector('#bd-copy').onclick = async () => {
       if (!readForm()) return;
       beds[index] = b;
-      beds.splice(index + 1, 0, { ...b, id: uid(), sample: '' });
+      beds.splice(index + 1, 0, { ...b, id: uid(), sample: '', modifiers: [...(b.modifiers || [])], inter: [...(b.inter || [])], structSyms: [...(b.structSyms || [])] });
       await saveStation(st); renderLog();
       moveBed(st, index + 1, 'Where should the copy go?');
     };
