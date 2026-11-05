@@ -108,8 +108,8 @@ const DEFS = `<defs>${PATTERNS.map(([id, w, h, , sym]) =>
   `<pattern id="${id}-l" width="${w}" height="${h}" patternUnits="userSpaceOnUse">${sym.replace(/INK/g, '#f2f2f2')}</pattern>`).join('')}</defs>`;
 
 // ---------- visual pickers (same look as the colour picker) for lithology, bed shape and base contact ----------
-export function lithSwatch(name, w = 40, h = 26) {
-  const pat = patternFor(name), fill = DEFAULT_FILL[pat];
+export function lithSwatch(name, w = 40, h = 26, colour) {
+  const pat = patternFor(name), fill = colour || DEFAULT_FILL[pat];
   return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"><rect width="${w}" height="${h}" fill="${fill}"/>
     <rect width="${w}" height="${h}" fill="url(#${pat}${isDark(fill) ? '-l' : ''})" stroke="#000" stroke-width=".8"/></svg>`;
 }
@@ -328,11 +328,10 @@ export function logSvg(st) {
   const LH = 12, descBlocks = {};
   let lastBottom = top - 12;
   for (const i of order) {
-    const b = beds[i];
-    const lines = [`${i + 1}. ${b.lithology || ''}${b.thickness ? ' (' + b.thickness + ' m)' : ''}`,
-      [stripCode(b.color), b.grain, b.structures, b.fossils].map(t => String(t || '').trim()).filter(Boolean).join(', '),
-      b.description, b.sample ? 'Sample: ' + b.sample : '']
-      .filter(t => String(t || '').trim()).flatMap((t, k) => wrapText(t, 46).map(line => ({ line, first: k === 0 })));
+    // only the geologist's own comment for the bed is written in the Description column
+    const lines = String(beds[i].description || '').split(/\n+/).map(t => t.trim()).filter(Boolean)
+      .flatMap(t => wrapText(t, 46).map(line => ({ line, first: true })));
+    if (!lines.length) { descBlocks[i] = { y0: bedTop[i] + 10, lines }; continue; }
     const y0 = Math.max(bedTop[i] + 10, lastBottom + LH + 4);
     descBlocks[i] = { y0, lines };
     lastBottom = y0 + (lines.length - 1) * LH;
@@ -417,7 +416,7 @@ export function logSvg(st) {
       s += `<text x="${textX}" y="${y0 + k * LH}" font-size="10" fill="${d.first ? '#000' : '#333'}">${esc2(d.line)}</text>`;
     });
     s += `<line x1="${colX + w}" y1="${y}" x2="${textX - 4}" y2="${y}" stroke="#ccc" stroke-dasharray="2 2"/>`;
-    if (y0 > y + 11) s += `<line x1="${textX - 4}" y1="${y}" x2="${textX - 1}" y2="${y0 - 8}" stroke="#bbb" stroke-width=".7"/>`;
+    if (lines.length && y0 > y + 11) s += `<line x1="${textX - 4}" y1="${y}" x2="${textX - 1}" y2="${y0 - 8}" stroke="#bbb" stroke-width=".7"/>`;
     y += h;
   }
   s += `<line x1="${colX - 14}" y1="${y}" x2="${colX - 10}" y2="${y}" stroke="#000"/><text x="${colX - 16}" y="${y + 4}" font-size="9" text-anchor="end">0</text>`;
@@ -488,17 +487,71 @@ export function renderLog() {
     ${beds.length ? `<div class="log-svg-wrap">${logSvg(st)}</div>
       <div class="card"><table class="tbl"><tr><th>#</th><th>Lithology</th><th>m</th><th>Grain</th></tr>
       ${beds.map((b, i) => ({ b, i })).reverse().map(({ b, i }) => `<tr data-i="${i}"><td>${i + 1}</td><td>${esc(b.lithology || '')}${b.formation ? `<div class="muted">${esc([b.formation, b.member].filter(Boolean).join(' / '))}</div>` : ''}</td><td>${esc(b.thickness)}</td><td>${esc(b.grain || '')}</td></tr>`).join('')}
-      </table><p class="muted">Bed 1 is the base. Tap a bed to edit.</p>
+      </table><p class="muted">Bed 1 is the base. Tap a bed to edit or copy it · press and hold a bed to move it.</p>
       <div class="btns"><button class="btn" id="lg-svg">Export SVG</button><button class="btn" id="lg-png">Export PNG</button></div></div>`
     : '<div class="empty">No beds yet. Start from the base of the section and add beds upward.</div>'}`;
   $('#lg-add').onclick = () => editBed(st, null);
   $('#lg-open').onclick = () => nav.openStation(st.id, 'data');
-  body.querySelectorAll('tr[data-i]').forEach(r => r.onclick = () => editBed(st, Number(r.dataset.i)));
+  body.querySelectorAll('tr[data-i]').forEach(r => bindBedRow(r, st));
   const svgBtn = $('#lg-svg');
   if (svgBtn) {
     svgBtn.onclick = () => saveFile(new Blob([logSvg(st)], { type: 'image/svg+xml' }), `${st.code}_log.svg`);
     $('#lg-png').onclick = () => exportPng(st);
   }
+}
+
+// tap = edit; press and hold (0.5 s) = move menu
+function bindBedRow(row, st) {
+  const i = Number(row.dataset.i);
+  let timer = null, held = false, sx = 0, sy = 0;
+  const cancel = () => { clearTimeout(timer); timer = null; row.classList.remove('pressing'); };
+  row.addEventListener('pointerdown', e => {
+    held = false; sx = e.clientX; sy = e.clientY;
+    row.classList.add('pressing');
+    timer = setTimeout(() => {
+      timer = null; held = true; row.classList.remove('pressing');
+      if (navigator.vibrate) navigator.vibrate(30);
+      moveBed(st, i);
+    }, 500);
+  });
+  row.addEventListener('pointermove', e => { if (timer && Math.hypot(e.clientX - sx, e.clientY - sy) > 10) cancel(); });
+  ['pointerup', 'pointercancel', 'pointerleave'].forEach(ev => row.addEventListener(ev, cancel));
+  row.addEventListener('contextmenu', e => e.preventDefault());
+  row.addEventListener('click', () => { if (held) { held = false; return; } editBed(st, i); });
+}
+
+const bedLabel = (b, n) => `${n}. ${b.lithology || 'Bed'}${b.thickness ? ' · ' + b.thickness + ' m' : ''}`;
+
+// choose where a bed goes: top, base, or between two other beds
+function moveBed(st, from, title) {
+  const beds = st.log.beds;
+  const moving = beds[from];
+  const rest = beds.filter((_, k) => k !== from);
+  const slot = k => {
+    const where = k === rest.length ? 'Move to the top' : k === 0 ? 'Move to the base' : `Between ${rest[k - 1].lithology || 'bed'} and ${rest[k].lithology || 'bed'}`;
+    return k === from
+      ? `<div class="mv-slot mv-here">● Current position</div>`
+      : `<button type="button" class="mv-slot" data-k="${k}">↳ ${esc(where)}</button>`;
+  };
+  let html = `<p class="muted">Bed ${from + 1}: <b>${esc(moving.lithology || 'Bed')}</b>${moving.thickness ? ' · ' + esc(moving.thickness) + ' m' : ''}. Tap where it should go (top of the list = top of the log).</p><div class="mv-list">`;
+  for (let k = rest.length; k >= 0; k--) {
+    html += slot(k);
+    if (k > 0) {
+      const b = rest[k - 1], orig = beds.indexOf(b);
+      html += `<div class="mv-bed"><span class="lp-sw small">${lithSwatch(b.lithology, 30, 24, colourHex(b.color))}</span>${esc(bedLabel(b, orig + 1))}</div>`;
+    }
+  }
+  html += `</div><div class="btns"><button class="btn" id="mv-cancel">Cancel</button></div>`;
+  ensureDefs();
+  const body = openModal(title || 'Move bed', html);
+  body.querySelector('#mv-cancel').onclick = () => { closeModal(); renderLog(); };
+  body.querySelectorAll('button.mv-slot').forEach(btn => btn.onclick = async () => {
+    const k = Number(btn.dataset.k);
+    rest.splice(k, 0, moving);
+    st.log.beds = rest;
+    await saveStation(st); closeModal(); renderLog();
+    toast(`Bed moved to position ${k + 1} of ${rest.length}`);
+  });
 }
 
 async function exportPng(st) {
@@ -547,27 +600,38 @@ function editBed(st, index) {
     <div class="field"><label>Description</label><textarea id="bd-desc">${esc(b.description)}</textarea></div>
     <div class="field"><label>Sample no.</label><input type="text" id="bd-sample" value="${esc(b.sample)}"></div>
     <div class="btns"><button class="btn primary" id="bd-save">Save</button>
-      ${index != null ? '<button class="btn" id="bd-up">Move up</button><button class="btn" id="bd-down">Move down</button><button class="btn danger" id="bd-del">Delete</button>' : ''}</div>`);
+      ${index != null ? '<button class="btn" id="bd-copy">Copy bed</button><button class="btn" id="bd-move">Move…</button><button class="btn danger" id="bd-del">Delete</button>' : ''}</div>`);
   const v = id => body.querySelector(id).value;
   bindColourField(body.querySelector('.colour-field:not(.visual-field)'));
   body.querySelectorAll('.visual-field').forEach(bindVisualField);
   body.querySelector('#bd-fm').onchange = e => { b.member = ''; body.querySelector('#bd-mbr').innerHTML = memberOpts(e.target.value); };
-  body.querySelector('#bd-save').onclick = async () => {
+  // reads the form into the bed; false when the thickness is missing
+  const readForm = () => {
     const th = Number(v('#bd-th'));
-    if (!th || th <= 0) { toast('Enter a thickness in metres'); return; }
+    if (!th || th <= 0) { toast('Enter a thickness in metres'); return false; }
     Object.assign(b, { thickness: th, formation: v('#bd-fm'), member: v('#bd-mbr'), contact: v('#bd-contact'), lithology: v('#bd-lith'), grain: v('#bd-grain'), shape: v('#bd-shape'), color: v('#bd-color'),
       structures: v('#bd-struct'), fossils: v('#bd-fossils'), description: v('#bd-desc'), sample: v('#bd-sample') });
+    return true;
+  };
+  body.querySelector('#bd-save').onclick = async () => {
+    if (!readForm()) return;
     if (index == null) beds.push(b); else beds[index] = b;
     await saveStation(st); closeModal(); renderLog();
   };
-  const move = async d => {
-    const j = index + d; if (j < 0 || j >= beds.length) return;
-    [beds[index], beds[j]] = [beds[j], beds[index]];
-    await saveStation(st); closeModal(); renderLog();
-  };
   if (index != null) {
-    body.querySelector('#bd-up').onclick = () => move(1);
-    body.querySelector('#bd-down').onclick = () => move(-1);
+    // copy: keeps any edits, puts the copy just above the original, then asks where it should go
+    body.querySelector('#bd-copy').onclick = async () => {
+      if (!readForm()) return;
+      beds[index] = b;
+      beds.splice(index + 1, 0, { ...b, id: uid(), sample: '' });
+      await saveStation(st); renderLog();
+      moveBed(st, index + 1, 'Where should the copy go?');
+    };
+    body.querySelector('#bd-move').onclick = async () => {
+      if (!readForm()) return;
+      beds[index] = b; await saveStation(st);
+      moveBed(st, index);
+    };
     body.querySelector('#bd-del').onclick = async () => {
       if (!(await confirmBox('Delete this bed?'))) return;
       beds.splice(index, 1); await saveStation(st); closeModal(); renderLog();

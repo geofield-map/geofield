@@ -110,6 +110,12 @@ input[readonly] { color: var(--muted); }
 table.tbl { width: 100%; border-collapse: collapse; font-size: 14px; }
 table.tbl th, table.tbl td { padding: 7px 5px; border-bottom: 1px solid var(--line); text-align: left; }
 table.tbl th { color: var(--muted); font-weight: 500; font-size: 12px; }
+#log-body tr[data-i] { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; touch-action: pan-y; transition: background .3s; }
+#log-body tr[data-i].pressing { background: #ffffff14; }
+.mv-list { display: flex; flex-direction: column; gap: 4px; margin: 8px 0; }
+.mv-bed { display: flex; align-items: center; gap: 10px; padding: 8px 10px; background: var(--card, #1e2329); border-radius: 8px; font-size: 15px; }
+.mv-slot { display: block; width: 100%; text-align: left; padding: 9px 12px; border: 1px dashed #e8894a99; border-radius: 8px; background: transparent; color: #e8894a; font-size: 14px; font-family: inherit; cursor: pointer; }
+.mv-slot.mv-here { border-color: #ffffff33; color: var(--muted); cursor: default; }
 
 .stereo-wrap { display: flex; justify-content: center; }
 .stereo-wrap svg { max-width: 340px; width: 100%; }
