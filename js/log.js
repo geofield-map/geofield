@@ -724,6 +724,7 @@ export function renderLog() {
   state.currentStationId = st.id; sel.value = st.id;
   st.log = st.log || { beds: [] };
   removeCycleLabels(st);
+  summariseOldMerges(st);
   const beds = st.log.beds;
   const total = beds.reduce((a, b) => a + (Number(b.thickness) || 0), 0);
   body.innerHTML = `
@@ -762,6 +763,26 @@ function removeCycleLabels(st) {
   st.log.beds.forEach(clean);
   st.log.cycleLabelsRemoved = true;
   saveStation(st);
+}
+
+// One-time update: beds merged before merges wrote a summary only have the two old descriptions
+// one under the other. Give them the summary now, the same one a merge writes today. Recognised by:
+// remembering their two original beds without own notes (merged with v23–v26), or, in MM-COMPOSITE,
+// a description on two lines (merged with v22, which joined the two descriptions with a line break).
+function summariseOldMerges(st) {
+  if (st.log.oldMergesSummarised) return;
+  let changed = false;
+  for (const b of st.log.beds) {
+    if (b.notes != null) continue; // already has a summary
+    const remembered = (b.mergedFrom || []).length === 2;
+    const twoLines = st.code === 'MM-COMPOSITE' && /\n/.test(b.description || '');
+    if (!remembered && !twoLines) continue;
+    b.description = bedSummary(b);
+    changed = true;
+  }
+  st.log.oldMergesSummarised = true;
+  saveStation(st);
+  if (changed) setTimeout(() => toast('Merged beds now have a summary description'), 300);
 }
 
 // tap = edit; press and hold (0.5 s) = move menu
