@@ -209,7 +209,8 @@ function renderForm(st, body) {
     el.addEventListener(el.tagName === 'SELECT' ? 'change' : 'input', handler);
   };
   body.querySelectorAll('[data-key]').forEach(bind);
-  body.querySelectorAll('.colour-field').forEach(bindColourField);
+  // colour pickers open on the typical colours of the station's lithology
+  body.querySelectorAll('.colour-field').forEach(el => bindColourField(el, () => st.attrs.lithology || ''));
 
   $('#st-rename').onclick = async () => {
     const input = window.prompt('New station name', st.code);

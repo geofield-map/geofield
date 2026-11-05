@@ -1205,7 +1205,10 @@ function editBed(st, index) {
     <div class="btns"><button class="btn primary" id="bd-save">Save</button>
       ${index != null ? `<button class="btn" id="bd-copy">Copy bed</button><button class="btn" id="bd-move">Move…</button>${index < beds.length - 1 ? '<button class="btn" id="bd-merge">Merge with bed above</button>' : ''}${(b.mergedFrom || []).length === 2 ? '<button class="btn" id="bd-split">Split back into 2 beds</button>' : '<button class="btn" id="bd-cut">Split bed in two…</button>'}<button class="btn danger" id="bd-del">Delete</button>` : ''}</div>`);
   const v = id => body.querySelector(id).value;
-  body.querySelectorAll('.colour-field:not(.visual-field)').forEach(bindColourField);
+  // the colour picker opens on the typical colours of the chosen lithology
+  // the main colour can also go back to the Aramco chart colour (no field colour: the log uses the Lithology Key fill)
+  body.querySelectorAll('.colour-field:not(.visual-field)').forEach(el => bindColourField(el, () => v('#bd-lith'),
+    el.querySelector('#bd-color') ? () => (v('#bd-lith') ? DEFAULT_FILL[patternFor(v('#bd-lith'))] : '') : null));
   const cmode = body.querySelector('#bd-cmode');
   const showC2 = () => {
     body.querySelector('#bd-color2-f').style.visibility = cmode.value ? '' : 'hidden';

@@ -78,6 +78,29 @@ function labToHex(L, a, b) {
 
 export const colourLabel = (code, name) => `${name} (${code})`;
 
+// ---------- typical colours per rock type ----------
+// The GSA Rock-Color Chart is one chart for all rocks; these are the chips commonly used for each rock
+// type in field descriptions, shown first in the picker. The whole chart stays one tap away.
+const TYPICAL = [
+  ['Dolomite', /dolo/, ['10YR 8/2', '10YR 7/4', '10YR 8/6', '10YR 6/2', '10YR 5/4', '5YR 8/1', '5YR 6/4', '5YR 5/2', '5Y 8/1', '5Y 7/2', 'N8', 'N7', 'N6', 'N5']],
+  ['Limestone', /lime|calc|wacke|chalk|carbonate/, ['N9', 'N8', 'N7', 'N6', 'N5', '5Y 8/1', '5Y 7/2', '10YR 8/2', '10YR 7/4', '10YR 6/2', '5YR 8/1', '5B 7/1', '5B 5/1']],
+  ['Marl', /marl/, ['5Y 8/1', '5Y 7/2', '5Y 6/1', '5Y 5/2', '5GY 6/1', 'N7', 'N6', '10YR 7/4', '10YR 6/2']],
+  ['Sandstone', /sand|arkose|greywacke|arenite|conglom|breccia|diamict|tillite/, ['N9', 'N8', 'N7', '5Y 8/1', '5YR 8/1', '10YR 8/2', '10YR 7/4', '10YR 8/6', '10YR 6/6', '10YR 6/2', '10YR 5/4', '5YR 6/4', '5YR 5/6', '5YR 4/4', '10R 6/6', '10R 5/4', '10R 4/6', '10R 3/4', '5R 4/6', '5R 3/4']],
+  ['Fine-grained rocks', /silt|mud|clay|shale/, ['N8', 'N7', 'N6', 'N5', 'N4', 'N3', 'N2', '5Y 6/1', '5Y 4/1', '5Y 5/2', '5GY 6/1', '5GY 4/1', '10YR 6/2', '10YR 7/4', '5YR 4/4', '10R 5/4', '10R 4/2', '10R 3/4', '5R 4/2', '5P 4/2', '5RP 4/2']],
+  ['Ironstone', /iron|laterite|gossan/, ['10R 4/6', '10R 3/4', '10R 2/2', '5R 3/4', '5R 2/2', '5YR 3/4', '5YR 2/2', '5YR 2/1', '10YR 4/2', '10YR 2/2']],
+  ['Evaporites', /gyps|anhyd|halite|salt|evapor/, ['N9', 'N8', 'N7', '5YR 8/1', '5R 8/2', '10YR 8/2', '5Y 8/1']],
+  ['Chert', /chert/, ['N7', 'N5', 'N4', 'N3', 'N2', '10YR 6/2', '5YR 4/4', '10R 4/2']],
+  ['Coal', /coal/, ['N1', 'N2', '5YR 2/1', '5YR 2/2']],
+];
+const CHIP_NAME = Object.fromEntries(COLOUR_GROUPS.flatMap(g => g[1]));
+// { title, chips: [[code, name]] } for a lithology, or null when no typical set is known
+export function typicalColours(lithology) {
+  const l = String(lithology || '').toLowerCase();
+  if (!l) return null;
+  const t = TYPICAL.find(([, re]) => re.test(l));
+  return t ? { title: `Typical colours for ${lithology}`, chips: t[2].filter(c => CHIP_NAME[c]).map(c => [c, CHIP_NAME[c]]) } : null;
+}
+
 // Swatch colour for a stored value such as "Moderate reddish brown (10R 4/6)".
 export function colourHex(text) {
   if (!text) return null;
@@ -104,8 +127,10 @@ function chip(value, code, name) {
     <span class="cp-txt"><span>${esc(name || value)}</span>${code ? `<small>${esc(code)}</small>` : ''}</span></button>`;
 }
 
-export async function pickColour(current) {
+// chartFill: the lithology's colour in the Saudi Aramco chart's Lithology Key (used when no field colour is set)
+export async function pickColour(current, lithology, chartFill) {
   const rec = await recent();
+  const typical = typicalColours(lithology);
   if (!overlay) {
     overlay = document.createElement('div');
     overlay.id = 'colour-picker';
@@ -118,11 +143,20 @@ export async function pickColour(current) {
       <button class="btn small" data-act="mottled">Mottled (2 colours)</button><button class="btn small danger" data-act="clear">Clear</button></div></div>
     <div class="cp-body">
       ${current ? `<div class="cp-group" data-fixed><div class="group-title">Current</div><div class="cp-grid">${chip(current)}</div></div>` : ''}
+      ${chartFill && lithology ? `<div class="cp-group" data-fixed><div class="group-title">Saudi Aramco chart colour</div><div class="cp-grid">
+        <button class="cp-chip" data-v=""><span class="cp-sw" style="background:${esc(chartFill)}"></span>
+        <span class="cp-txt"><span>Chart colour for ${esc(lithology)}</span><small>Lithology Key · no field colour</small></span></button></div></div>` : ''}
+      ${typical ? `<div class="cp-group" data-fixed><div class="group-title">${esc(typical.title)}</div><div class="cp-grid">
+        ${typical.chips.map(([code, name]) => chip(colourLabel(code, name), code, name)).join('')}</div></div>` : ''}
       ${rec.length ? `<div class="cp-group" data-fixed><div class="group-title">Recently used</div><div class="cp-grid">${rec.map(v => chip(v)).join('')}</div></div>` : ''}
+      ${typical ? `<div class="btns" id="cp-more"><button class="btn small" data-act="all">Show all colours</button></div>` : ''}
+      <div id="cp-all" ${typical ? 'style="display:none"' : ''}>
       ${COLOUR_GROUPS.map(([g, list]) => `<div class="cp-group"><div class="group-title">${g}</div><div class="cp-grid">
         ${list.map(([code, name]) => chip(colourLabel(code, name), code, name)).join('')}</div></div>`).join('')}
+      </div>
     </div></div>`;
   overlay.classList.remove('hidden');
+  const showAll = () => { overlay.querySelector('#cp-all').style.display = ''; const m = overlay.querySelector('#cp-more'); if (m) m.style.display = 'none'; };
 
   return new Promise(resolve => {
     let mottledFirst = null;
@@ -134,6 +168,7 @@ export async function pickColour(current) {
       const act = btn.dataset.act;
       if (act === 'close') return done(undefined);
       if (act === 'clear') return done('');
+      if (act === 'all') { showAll(); return; }
       if (act === 'custom') { const v = window.prompt('Colour', current || ''); if (v != null) done(v.trim()); return; }
       if (act === 'mottled') {
         mottledFirst = '';
@@ -154,6 +189,7 @@ export async function pickColour(current) {
     const search = overlay.querySelector('.cp-search');
     search.oninput = () => {
       const q = search.value.toLowerCase().trim();
+      if (q) showAll(); // searching always looks through the whole chart
       overlay.querySelectorAll('.cp-group').forEach(g => {
         let any = false;
         g.querySelectorAll('.cp-chip').forEach(c => {
@@ -176,10 +212,11 @@ export function colourFieldHtml(key, value, attr = 'data-key') {
 }
 
 // Make a colour-field open the picker; fires 'input' on the hidden input after a choice.
-export function bindColourField(wrapper) {
+// lithologyOf (optional) returns the rock type, so the picker can show that rock's typical colours first.
+export function bindColourField(wrapper, lithologyOf, chartFillOf) {
   const input = wrapper.querySelector('input');
   wrapper.addEventListener('click', async () => {
-    const v = await pickColour(input.value);
+    const v = await pickColour(input.value, lithologyOf ? lithologyOf() : '', chartFillOf ? chartFillOf() : '');
     if (v === undefined) return;
     input.value = v;
     const text = wrapper.querySelector('.cf-text');
