@@ -1,7 +1,7 @@
 // Stratigraphic log for a station: beds from base to top, drawn as a graphic column.
 import { state, saveStation, getStation } from './state.js';
 import { db, uid } from './db.js';
-import { $, esc, openModal, closeModal, toast, confirmBox, saveFile, resetViewport } from './ui.js';
+import { $, esc, openModal, closeModal, toast, confirmBox, saveFile, resetViewport, loadScript } from './ui.js';
 import { LITHOLOGIES } from './schema.js';
 import { FORMATION_NAMES, findFormation, CHART_LITHOLOGIES, chronoColour, formationColour } from './strat.js';
 import { colourFieldHtml, bindColourField, colourHex } from './colours.js';
@@ -692,7 +692,7 @@ export function renderLog() {
       ${beds.map((b, i) => ({ b, i })).reverse().map(({ b, i }) => `<tr data-i="${i}"><td>${i + 1}</td><td>${esc(b.lithology ? bedName(b) : '')}${b.formation || b.unit ? `<div class="muted">${esc([b.formation, b.member, b.unit].filter(Boolean).join(' / '))}</div>` : ''}</td><td>${b.estimated ? '~' : ''}${esc(b.thickness)}</td><td>${esc((isCarbonate(b.lithology) && b.texture ? [b.texture, b.textureTop] : [b.grain, b.grainTop]).filter(Boolean).join(' → '))}</td></tr>`).join('')}
       </table><p class="muted">Bed 1 is the base. Tap a bed to edit or copy it · press and hold a bed to move it.</p>
       <div class="btns"><button class="btn" id="lg-repeat">Repeat beds…</button></div>
-      <div class="btns"><button class="btn" id="lg-svg">Export SVG</button><button class="btn" id="lg-png">Export PNG</button></div></div>`
+      <div class="btns"><button class="btn" id="lg-pdf">Export PDF</button><button class="btn" id="lg-png">Export PNG</button><button class="btn" id="lg-svg">Export SVG</button></div></div>`
     : '<div class="empty">No beds yet. Start from the base of the section and add beds upward.</div>'}`;
   $('#lg-add').onclick = () => editBed(st, null);
   $('#lg-open').onclick = () => nav.openStation(st.id, 'data');
@@ -702,6 +702,7 @@ export function renderLog() {
     $('#lg-repeat').onclick = () => repeatBeds(st);
     svgBtn.onclick = () => saveFile(new Blob([logSvg(st)], { type: 'image/svg+xml' }), `${st.code}_log.svg`);
     $('#lg-png').onclick = () => exportPng(st);
+    $('#lg-pdf').onclick = () => exportPdf(st);
   }
 }
 
@@ -810,6 +811,41 @@ async function exportPng(st) {
     const blob = await new Promise(r => c.toBlob(r, 'image/png'));
     await saveFile(blob, `${st.code}_log.png`);
   } catch (e) { toast('PNG export failed; use SVG'); } finally { URL.revokeObjectURL(url); }
+}
+
+// PDF: the log drawn as vectors (sharp at any zoom, text selectable), one page sized to the log.
+// Falls back to a high-resolution picture inside the PDF if the vector conversion fails.
+export const JSPDF_URL = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
+export const SVG2PDF_URL = 'https://unpkg.com/svg2pdf.js@2.2.3/dist/svg2pdf.umd.min.js';
+async function exportPdf(st) {
+  toast('Preparing PDF…', 3000);
+  try { await loadScript(JSPDF_URL); await loadScript(SVG2PDF_URL); }
+  catch (e) { toast('PDF needs an internet connection the first time; use PNG for now', 5000); return; }
+  const svgText = logSvg(st);
+  const el = new DOMParser().parseFromString(svgText, 'image/svg+xml').documentElement;
+  const W = Number(el.getAttribute('width')), H = Number(el.getAttribute('height'));
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ orientation: H > W ? 'portrait' : 'landscape', unit: 'pt', format: [W, H] });
+  doc.setProperties({ title: `${st.code} stratigraphic log`, creator: 'GeoField' });
+  const holder = document.createElement('div'); // the converter measures text, so the drawing must be in the page
+  holder.style.cssText = 'position:absolute;left:-99999px;top:0;';
+  holder.appendChild(el); document.body.appendChild(holder);
+  try {
+    await doc.svg(el, { x: 0, y: 0, width: W, height: H });
+  } catch (e) {
+    // picture fallback: render at 4x and place it on the page
+    const url = URL.createObjectURL(new Blob([svgText], { type: 'image/svg+xml' }));
+    try {
+      const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = url; });
+      const k = Math.min(4, Math.sqrt(16e6 / (W * H))); // stay under the iPhone canvas limit
+      const c = document.createElement('canvas'); c.width = Math.round(W * k); c.height = Math.round(H * k);
+      const ctx = c.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height); ctx.scale(k, k); ctx.drawImage(img, 0, 0);
+      doc.addImage(c.toDataURL('image/png'), 'PNG', 0, 0, W, H);
+    } catch (e2) { holder.remove(); toast('PDF export failed; use PNG'); return; }
+    finally { URL.revokeObjectURL(url); }
+  }
+  holder.remove();
+  await saveFile(doc.output('blob'), `${st.code}_log.pdf`);
 }
 
 function opts(list, val) {

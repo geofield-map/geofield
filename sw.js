@@ -1,5 +1,5 @@
 // Offline support: keeps the app, its libraries and viewed map tiles on the phone.
-const VERSION = 'geofield-v20';
+const VERSION = 'geofield-v21';
 const TILE_CACHE = 'geofield-tiles';
 
 const APP_FILES = [
@@ -19,6 +19,8 @@ const LIBS = [
   'https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/sql-wasm.wasm',
   'https://unpkg.com/georaster@1.6.0/dist/georaster.browser.bundle.min.js',
   'https://unpkg.com/georaster-layer-for-leaflet@3.10.0/dist/georaster-layer-for-leaflet.min.js',
+  'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js',
+  'https://unpkg.com/svg2pdf.js@2.2.3/dist/svg2pdf.umd.min.js',
 ];
 const TILE_HOSTS = ['server.arcgisonline.com', 'tile.opentopomap.org', 'tile.openstreetmap.org'];
 
