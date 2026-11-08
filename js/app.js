@@ -7,8 +7,9 @@ import { initStation, createStation, showStation, renderStationList } from './st
 import { initLog, renderLog } from './log.js';
 import { renderProjectStructures } from './structures.js';
 import { renderProject } from './project.js';
+import { initLibrary, renderLibrary, libraryGpsTick } from './library.js';
 
-const TITLES = { map: 'Map', stations: 'Stations', log: 'Stratigraphic Log', structs: 'Structures', project: 'Project' };
+const TITLES = { library: 'Maps', map: 'Map', stations: 'Stations', log: 'Stratigraphic Log', structs: 'Structures', project: 'Project' };
 let current = 'map';
 let previous = 'map';
 
@@ -16,7 +17,9 @@ function show(view) {
   if (view !== 'station') previous = view;
   current = view;
   $$('.view').forEach(v => v.classList.toggle('active', v.id === 'view-' + view));
-  $$('#tabbar button').forEach(b => b.classList.toggle('active', b.dataset.view === (view === 'station' ? previous : view)));
+  // the library belongs to the Map tab
+  const tabOf = v => (v === 'station' ? tabOf(previous) : v === 'library' ? 'map' : v);
+  $$('#tabbar button').forEach(b => b.classList.toggle('active', b.dataset.view === tabOf(view)));
   $('#btn-back').classList.toggle('hidden', view !== 'station');
   refresh();
 }
@@ -26,6 +29,7 @@ function refresh() {
   $('#title').textContent = current === 'station' ? (st ? st.code : 'Station') : TITLES[current];
   $('#subtitle').textContent = state.project ? state.project.name : '';
   if (current === 'map') invalidate();
+  else if (current === 'library') renderLibrary();
   else if (current === 'stations') renderStationList();
   else if (current === 'log') renderLog();
   else if (current === 'structs') renderProjectStructures(openStation);
@@ -42,6 +46,7 @@ const nav = {
   openStation,
   openLog: id => { state.currentStationId = id; show('log'); },
   showOnMap: st => { show('map'); focusStation(st); },
+  openMap: () => show('map'),
   back: () => show(previous),
   refreshTitle: () => {
     const st = getStation(state.currentStationId);
@@ -50,6 +55,8 @@ const nav = {
 };
 
 $$('#tabbar button').forEach(b => b.addEventListener('click', () => show(b.dataset.view)));
+$('#btn-library').addEventListener('click', () => show('library'));
+setInterval(() => libraryGpsTick(current === 'library'), 5000); // keep "distance from you" up to date
 $('#btn-back').addEventListener('click', () => show(previous));
 
 on('stations', () => { if (current === 'stations') renderStationList(); });
@@ -59,9 +66,11 @@ async function start() {
   initStation(nav);
   initLog(nav);
   initMap({ addPoint: fix => createStation(fix), openStation });
+  initLibrary(nav);
   const meta = await db.get('meta', 'currentProject');
   await loadProject(meta ? meta.value : null);
-  show('map');
+  show('library'); // the app opens on the maps library, as in Avenza Maps
+  invalidate();
   requestPersistence();
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
     // when a new version takes over, reload once so the new code runs straight away

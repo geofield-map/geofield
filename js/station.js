@@ -5,6 +5,7 @@ import { $, $$, esc, toast, openModal, closeModal, confirmBox, fmt, resetViewpor
 import { toUTM, toDMS } from './geo.js';
 import { LITHOLOGIES, ALL_LITHOLOGIES } from './schema.js';
 import { autofillFromLayers } from './layers.js';
+import { geologyFill } from './geology.js';
 import { findFormation, FORMATION_FILLS } from './strat.js';
 import { colourFieldHtml, bindColourField } from './colours.js';
 import { renderStationStructures } from './structures.js';
@@ -62,7 +63,9 @@ export async function createStation(fix) {
   const st = { id: uid(), projectId: p.id, code, created: new Date().toISOString(), attrs: {}, structures: [], log: { beds: [] } };
   setPosition(st, fix);
   for (const f of p.schema) if (f.auto) st.attrs[f.key] = autoValue(f.auto, st);
-  Object.assign(st.attrs, await autofillFromLayers(st.lat, st.lon));
+  // formation (and its era, period, epoch, age) from the built-in geological map, by GPS position alone
+  Object.assign(st.attrs, await geologyFill(st.lat, st.lon));
+  Object.assign(st.attrs, await autofillFromLayers(st.lat, st.lon)); // the geologist's own layers win
   fillFromFormation(st, true);
   await saveStation(st);
   toast(`${code} created`);
@@ -241,8 +244,12 @@ function renderForm(st, body) {
   };
   $('#st-refill').onclick = async () => {
     applyAuto(st, POSITION_SOURCES.concat(['station', 'region', 'license', 'project', 'prospect', 'geologist']));
-    Object.assign(st.attrs, await autofillFromLayers(st.lat, st.lon));
-    await saveStation(st); renderTab(); toast('Auto-fill applied');
+    const geo = await geologyFill(st.lat, st.lon);
+    Object.assign(st.attrs, geo);
+    Object.assign(st.attrs, await autofillFromLayers(st.lat, st.lon)); // own layers win over the built-in map
+    fillFromFormation(st, false);
+    await saveStation(st); renderTab();
+    toast(st.attrs.formation ? `Auto-fill applied · ${st.attrs.formation} (geological map)` : 'Auto-fill applied');
   };
   $('#st-del').onclick = async () => {
     if (!(await confirmBox(`Delete ${st.code} with its photos, structures and log? This cannot be undone.`))) return;

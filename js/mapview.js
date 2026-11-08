@@ -7,6 +7,7 @@ import { toUTM } from './geo.js';
 import {
   importFiles, projectLayers, showLayer, hideLayer, hideAll, zoomToLayer, setOpacity, attributeNames, VECTOR_COLORS,
 } from './layers.js';
+import { loadGeology, geologyAt, unitColour } from './geology.js';
 
 const BASEMAPS = {
   imagery: { name: 'Satellite (Esri)', url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', attr: 'Esri World Imagery', maxNativeZoom: 19 },
@@ -31,6 +32,7 @@ export function initMap(h) {
   stationLayer = L.layerGroup().addTo(map);
 
   db.get('meta', 'basemap').then(m => setBasemap(m ? m.value : 'imagery'));
+  db.get('meta', 'geoOverlay').then(m => { if (m && m.value) setGeoOverlay(true); });
 
   $('#btn-locate').addEventListener('click', () => {
     if (state.gps) map.setView([state.gps.lat, state.gps.lon], Math.max(map.getZoom(), 16));
@@ -69,6 +71,38 @@ function setBasemap(key) {
     baseLayer.bringToBack();
   }
   db.put('meta', { id: 'basemap', value: baseKey });
+}
+
+// ---------- built-in geological map ----------
+let geoLayer = null;
+async function setGeoOverlay(on) {
+  db.put('meta', { id: 'geoOverlay', value: !!on });
+  if (geoLayer) { map.removeLayer(geoLayer); geoLayer = null; }
+  if (!on) return;
+  let d;
+  try { d = await loadGeology(); } catch (e) { toast('Geological map not available offline yet: open the app once with internet'); return; }
+  const fc = { type: 'FeatureCollection', features: d.features.map(f => ({ type: 'Feature', properties: { code: f.code }, geometry: { type: 'MultiPolygon', coordinates: f.polys } })) };
+  geoLayer = L.geoJSON(fc, {
+    style: f => ({ color: '#333', weight: 0.6, opacity: 0.7, fillColor: unitColour(d.units[f.properties.code]), fillOpacity: 0.5 }),
+    onEachFeature: (f, l) => l.bindPopup(() => {
+      const u = d.units[f.properties.code] || {};
+      return `<b>${esc(u.name || f.properties.code)}</b><br>${esc([u.period, u.epoch].filter(Boolean).join(' · '))}<br>${esc(u.age || '')}<br><span style="color:#666">${esc(u.lith || '')}</span>`;
+    }),
+  }).addTo(map);
+  // above base maps and imported rasters, below the stations
+  geoLayer.bringToFront(); stationLayer.eachLayer(l => l.bringToFront && l.bringToFront());
+}
+
+// the formation under the GPS position, shown in the GPS panel (looked up at most every 5 s)
+let lastGeoLookup = 0, geoLine = '';
+async function updateGeoLine(g) {
+  if (Date.now() - lastGeoLookup < 5000) return;
+  lastGeoLookup = Date.now();
+  try {
+    const u = await geologyAt(g.lat, g.lon);
+    geoLine = u ? ` · ${u.formation ? u.formation + ' Fm' : u.name}${u.period ? ' (' + u.period + ')' : ''}` : '';
+  } catch (e) { geoLine = ''; }
+  updateGpsPanel(true);
 }
 
 async function reloadUserLayers() {
@@ -119,18 +153,19 @@ function onPosition(pos) {
     userMarker.setLatLng(ll);
     accCircle.setLatLng(ll).setRadius(c.accuracy);
   }
-  if (firstFix) { firstFix = false; map.setView(ll, 15); }
+  if (firstFix) { firstFix = false; map.invalidateSize(); map.setView(ll, 15); }
   updateGpsPanel();
 }
 
-function updateGpsPanel() {
+function updateGpsPanel(fromGeo) {
   const g = state.gps;
   if (!g) return;
   const zone = state.project ? state.project.utmZone : 38;
   const u = toUTM(g.lat, g.lon, zone);
   $('#gps-line1').textContent = `E ${u.easting.toFixed(0)}  N ${u.northing.toFixed(0)}  (UTM ${zone}N)  ±${fmt(g.acc, 0)} m`;
-  $('#gps-line2').textContent = `${g.lat.toFixed(6)}, ${g.lon.toFixed(6)}  ·  Elev ${g.alt == null ? '–' : fmt(g.alt, 0) + ' m'}`;
+  $('#gps-line2').textContent = `${g.lat.toFixed(6)}, ${g.lon.toFixed(6)}  ·  Elev ${g.alt == null ? '–' : fmt(g.alt, 0) + ' m'}${geoLine}`;
   if (crosshairOn) updateCrossReadout();
+  if (!fromGeo) updateGeoLine(g);
 }
 
 function updateCrossReadout() {
@@ -157,12 +192,16 @@ async function openLayersPanel() {
   const body = openModal('Layers', `
     <div class="group-title" style="margin-top:0">Base map</div>${baseHtml}
     <p class="muted">Online base maps are saved on the phone for areas you have viewed. For guaranteed offline use, import your own GeoTIFF or MBTiles.</p>
+    <div class="group-title">Built-in</div>
+    <label class="check"><input type="checkbox" id="geo-ov" ${geoLayer ? 'checked' : ''}> Geological map (Arabian Platform formations)</label>
+    <p class="muted">Always used to fill Formation, Era, Period, Epoch and Age of new stations from GPS, shown or not.</p>
     <div class="group-title">My layers</div>${layerHtml}
     <div class="btns"><label class="btn primary" style="text-align:center">Import map files
       <input id="layer-file" type="file" multiple class="hidden"></label></div>
     <p class="muted">Supported: GeoTIFF (.tif), MBTiles (raster), KML, KMZ, GPX, GeoJSON, Shapefile (.zip, or pick .shp + .dbf + .prj together).</p>`);
 
   body.querySelectorAll('input[name=basemap]').forEach(r => r.addEventListener('change', () => setBasemap(r.value)));
+  body.querySelector('#geo-ov').addEventListener('change', e => setGeoOverlay(e.target.checked));
   body.querySelector('#layer-file').addEventListener('change', async e => {
     toast('Importing…');
     const created = await importFiles(e.target.files);
@@ -185,7 +224,7 @@ async function openLayersPanel() {
   });
 }
 
-function openLayerSettings(layer) {
+function openLayerSettings(layer, after = openLayersPanel) {
   const fields = state.project.schema;
   const attrs = layer.kind === 'vector' ? attributeNames(layer) : [];
   const attrOpts = sel => ['<option value="">—</option>', ...attrs.map(a => `<option ${a === sel ? 'selected' : ''}>${esc(a)}</option>`)].join('');
@@ -218,14 +257,35 @@ function openLayerSettings(layer) {
     await db.put('layers', layer);
     if (layer.visible) await showLayer(map, layer);
     toast('Layer saved');
-    openLayersPanel();
+    after();
   });
   body.querySelector('#ly-del').addEventListener('click', async () => {
     if (!(await confirmBox(`Delete layer "${layer.name}" from this phone?`))) return;
     hideLayer(map, layer.id);
     await db.del('layers', layer.id);
-    openLayersPanel();
+    after();
   });
 }
 
 export function invalidate() { if (map) setTimeout(() => map.invalidateSize(), 50); }
+
+// ---------- used by the Maps library screen ----------
+export const basemapName = () => BASEMAPS[baseKey].name;
+export const geoOverlayOn = () => !!geoLayer;
+export async function showGeoOverlay(on) { await setGeoOverlay(on); }
+// make a layer visible and zoom to it
+// (the map may have been hidden behind the library: measure it again before zooming)
+export async function openLayerOnMap(layer) {
+  if (!layer.visible) { layer.visible = true; await db.put('layers', layer); }
+  map.invalidateSize();
+  await showLayer(map, layer, true);
+}
+export async function zoomToBounds(b) { map.invalidateSize(); if (b) map.fitBounds([[b[1], b[0]], [b[3], b[2]]], { maxZoom: 17 }); }
+export async function importAndShow(files) {
+  toast('Importing…');
+  const created = await importFiles(files);
+  for (const l of created) await showLayer(map, l, false);
+  if (created.length) toast(`Imported ${created.length} map(s)`);
+  return created;
+}
+export function layerSettings(layer, after) { openLayerSettings(layer, after); }
