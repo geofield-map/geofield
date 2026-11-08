@@ -206,3 +206,6 @@ table.tbl th { color: var(--muted); font-weight: 500; font-size: 12px; }
 .bm-card.on { border-color: var(--accent); }
 .field .bm-layer, .bm-layer { justify-content: flex-start; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--line); }
 .bm-layer .muted { margin-left: auto; font-size: 12px; }
+.bm-grid { grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.bm-card { font-size: 12px; padding: 5px; }
+.bm-none { width: 100%; aspect-ratio: 1; border-radius: 8px; background: #2a3440; display: flex; align-items: center; justify-content: center; font-size: 24px; color: var(--muted); }

@@ -178,30 +178,40 @@ function updateCrossReadout() {
 }
 
 // ---------- layers panel ----------
+// preview tile of a base map around the current view
+function previewTile(template) {
+  const c = map.getCenter(), z = Math.max(3, Math.min(15, map.getZoom() - 1)), n = 2 ** z, r = c.lat * Math.PI / 180;
+  const x = Math.floor((c.lng + 180) / 360 * n), y = Math.floor((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2 * n);
+  return template.replace('{z}', z).replace('{x}', x).replace('{y}', y).replace('{s}', 'a');
+}
+
+// ☰ on the map: base map, the geologist's maps to show on it, the built-in geological map, import
 async function openLayersPanel() {
   const layers = await projectLayers();
-  const baseHtml = Object.entries(BASEMAPS).map(([k, b]) =>
-    `<label class="check"><input type="radio" name="basemap" value="${k}" ${k === baseKey ? 'checked' : ''}> ${b.name}</label>`).join('');
+  const baseHtml = `<div class="bm-grid">${Object.entries(BASEMAPS).map(([k, b]) => `<button class="bm-card ${k === baseKey ? 'on' : ''}" data-k="${k}">
+    ${b.url ? `<img src="${previewTile(b.url)}" alt="" onerror="this.style.visibility='hidden'">` : '<div class="bm-none">∅</div>'}
+    <span>${esc(b.name.replace(/\s*\(.*\)$/, '').replace('None', 'No base map'))}</span></button>`).join('')}</div>`;
   const layerHtml = layers.length ? layers.map(l => `
     <div class="layer-row" data-id="${l.id}">
       <input type="checkbox" class="lv" ${l.visible ? 'checked' : ''} style="width:22px;height:22px">
-      <div class="nm">${esc(l.name)}<div class="muted">${l.kind === 'vector' ? (l.geojson.features || []).length + ' features' : l.kind}${l.kind === 'vector' && Object.keys(l.autofill || {}).length ? ' · auto-fill on' : ''}</div></div>
+      <div class="nm">${esc(l.name)}<div class="muted">${['geotiff', 'mbtiles'].includes(l.kind) ? 'map' : (l.geojson.features || []).length + ' features'}${l.kind === 'vector' && Object.keys(l.autofill || {}).length ? ' · auto-fill on' : ''}</div></div>
       <button class="btn small lz">Zoom</button>
       <button class="btn small lm">⋯</button>
-    </div>`).join('') : '<p class="muted">No layers yet. Import your maps below.</p>';
+    </div>`).join('') : '<p class="muted">No maps uploaded yet. Import them below.</p>';
 
-  const body = openModal('Layers', `
+  const body = openModal('Maps on screen', `
     <div class="group-title" style="margin-top:0">Base map</div>${baseHtml}
-    <p class="muted">Online base maps are saved on the phone for areas you have viewed. For guaranteed offline use, import your own GeoTIFF or MBTiles.</p>
-    <div class="group-title">Built-in</div>
-    <label class="check"><input type="checkbox" id="geo-ov" ${geoLayer ? 'checked' : ''}> Geological map (Arabian Platform formations)</label>
-    <p class="muted">Always used to fill Formation, Era, Period, Epoch and Age of new stations from GPS, shown or not.</p>
-    <div class="group-title">My layers</div>${layerHtml}
+    <div class="group-title">Show my maps</div>${layerHtml}
+    <div class="layer-row"><input type="checkbox" id="geo-ov" ${geoLayer ? 'checked' : ''} style="width:22px;height:22px">
+      <div class="nm">Geological map · Arabian Platform<div class="muted">built-in · fills Formation from GPS, shown or not</div></div></div>
     <div class="btns"><label class="btn primary" style="text-align:center">Import map files
       <input id="layer-file" type="file" multiple class="hidden"></label></div>
-    <p class="muted">Supported: GeoTIFF (.tif), MBTiles (raster), KML, KMZ, GPX, GeoJSON, Shapefile (.zip, or pick .shp + .dbf + .prj together).</p>`);
+    <p class="muted">GeoTIFF, MBTiles (raster), KML, KMZ, GPX, GeoJSON, Shapefile (.zip, or .shp + .dbf + .prj together). Online base maps are kept on the phone for areas you have viewed.</p>`);
 
-  body.querySelectorAll('input[name=basemap]').forEach(r => r.addEventListener('change', () => setBasemap(r.value)));
+  body.querySelectorAll('.bm-card').forEach(c => c.addEventListener('click', () => {
+    setBasemap(c.dataset.k);
+    body.querySelectorAll('.bm-card').forEach(x => x.classList.toggle('on', x === c));
+  }));
   body.querySelector('#geo-ov').addEventListener('change', e => setGeoOverlay(e.target.checked));
   body.querySelector('#layer-file').addEventListener('change', async e => {
     toast('Importing…');
@@ -275,9 +285,10 @@ export const basemapName = () => BASEMAPS[savedBase].name;
 export const basemapList = () => Object.entries(BASEMAPS).filter(([, b]) => b.url).map(([key, b]) => ({ key, name: b.name, url: b.url, current: key === savedBase }));
 
 // Basemap view: the chosen base map with the geologist's maps that are switched on (and the geological map if on)
-export async function openBasemapMode(key) {
+export async function openBasemapMode(key, centreOnMe = false) {
   setBasemap(key || savedBase, true);
   map.invalidateSize();
+  if (centreOnMe && state.gps) map.setView([state.gps.lat, state.gps.lon], Math.max(map.getZoom(), 15));
   await reloadUserLayers();
   const g = await db.get('meta', 'geoOverlay');
   if (g && g.value && !geoLayer) await setGeoOverlay(true);

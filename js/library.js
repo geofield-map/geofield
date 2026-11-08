@@ -7,7 +7,6 @@ import { projectLayers } from './layers.js';
 import { fromUTM } from './geo.js';
 import { loadGeology } from './geology.js';
 import { basemapName, basemapList, geoOverlayOn, showGeoOverlay, openLayerOnMap, zoomToBounds, importAndShow, layerSettings, openBasemapMode, openSingleMap } from './mapview.js';
-import { openModal, closeModal } from './ui.js';
 
 let nav = {};
 let tab = 'maps', sortBy = 'recent';
@@ -70,39 +69,6 @@ function tileFor(b, template = ESRI) {
   return template.replace('{z}', z).replace('{x}', x).replace('{y}', y).replace('{s}', 'a');
 }
 
-// "Open basemap": choose the base map, and which of the geologist's maps and layers to show on top of it
-async function basemapChooser() {
-  const g = state.gps;
-  const here = g ? [g.lon - 0.02, g.lat - 0.02, g.lon + 0.02, g.lat + 0.02] : [45.9, 23.7, 46.4, 24.1];
-  const bases = basemapList();
-  let chosen = (bases.find(b => b.current) || bases[0]).key;
-  const layers = await projectLayers();
-  const geoOn = !!((await db.get('meta', 'geoOverlay')) || {}).value;
-  const body = openModal('Open basemap', `
-    <div class="group-title" style="margin-top:0">Base map</div>
-    <div class="bm-grid">${bases.map(b => `<button class="bm-card ${b.key === chosen ? 'on' : ''}" data-k="${b.key}">
-      <img src="${tileFor(here, b.url)}" alt="" onerror="this.style.visibility='hidden'"><span>${esc(b.name.replace(/\s*\(.*\)$/, ''))}</span></button>`).join('')}</div>
-    <div class="group-title">Show my maps on it</div>
-    ${layers.length ? layers.map(l => `<label class="check bm-layer"><input type="checkbox" data-id="${l.id}" ${l.visible ? 'checked' : ''}> ${esc(l.name)}
-      <span class="muted">${RASTER.includes(l.kind) ? 'map' : 'layer'}</span></label>`).join('') : '<p class="muted">No maps uploaded yet.</p>'}
-    <label class="check bm-layer"><input type="checkbox" id="bm-geo" ${geoOn ? 'checked' : ''}> Geological map · Arabian Platform <span class="muted">built-in</span></label>
-    <div class="btns"><button class="btn primary" id="bm-open">Open</button></div>`);
-  body.querySelectorAll('.bm-card').forEach(c => c.onclick = () => {
-    chosen = c.dataset.k;
-    body.querySelectorAll('.bm-card').forEach(x => x.classList.toggle('on', x === c));
-  });
-  body.querySelector('#bm-open').onclick = async () => {
-    for (const box of body.querySelectorAll('input[data-id]')) {
-      const l = layers.find(x => x.id === box.dataset.id);
-      if (l && l.visible !== box.checked) { l.visible = box.checked; await db.put('layers', l); }
-    }
-    await db.put('meta', { id: 'geoOverlay', value: body.querySelector('#bm-geo').checked });
-    closeModal();
-    nav.openMap();
-    await openBasemapMode(chosen);
-    if (!body.querySelector('#bm-geo').checked) await showGeoOverlay(false);
-  };
-}
 function outlineSvg(features, b, colour) {
   if (!b) return '';
   const [w, s, e, n] = b, k = 60 / Math.max(e - w, n - s, 1e-6);
@@ -162,7 +128,8 @@ export async function renderLibrary() {
   body.querySelector('#lib-sort').onchange = e => { sortBy = e.target.value; renderLibrary(); };
   body.querySelector('#lib-file').onchange = async e => { await importAndShow(e.target.files); renderLibrary(); };
   const base = body.querySelector('#lib-base');
-  if (base) base.onclick = basemapChooser;
+  // straight to the map at the current position; base map and "show my maps" choices are in the map's ☰ button
+  if (base) base.onclick = async () => { nav.openMap(); await openBasemapMode(null, true); };
   body.querySelectorAll('.lib-row').forEach(row => {
     const it = items[Number(row.dataset.i)];
     row.addEventListener('click', async e => {
