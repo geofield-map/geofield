@@ -198,3 +198,11 @@ table.tbl th { color: var(--muted); font-weight: 500; font-size: 12px; }
 .lib-name { font-size: 16px; font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lib-txt .muted { font-size: 13px; margin-top: 3px; }
 .lib-more { font-size: 22px; flex: 0 0 auto; }
+
+/* "Open basemap" chooser */
+.bm-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 6px; }
+.bm-card { display: flex; flex-direction: column; gap: 6px; padding: 6px; border: 2px solid var(--line); border-radius: 12px; background: var(--bg2); color: var(--text); font-size: 13px; font-weight: 600; }
+.bm-card img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 8px; background: #2a3440; }
+.bm-card.on { border-color: var(--accent); }
+.field .bm-layer, .bm-layer { justify-content: flex-start; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.bm-layer .muted { margin-left: auto; font-size: 12px; }

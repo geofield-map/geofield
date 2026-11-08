@@ -60,7 +60,7 @@ export function initMap(h) {
   on('project', reloadUserLayers);
 }
 
-function setBasemap(key) {
+function setBasemap(key, persist = true) {
   baseKey = BASEMAPS[key] ? key : 'imagery';
   if (baseLayer) map.removeLayer(baseLayer);
   baseLayer = null;
@@ -70,8 +70,9 @@ function setBasemap(key) {
     baseLayer.addTo(map);
     baseLayer.bringToBack();
   }
-  db.put('meta', { id: 'basemap', value: baseKey });
+  if (persist) { savedBase = baseKey; db.put('meta', { id: 'basemap', value: baseKey }); }
 }
+let savedBase = 'imagery'; // the base map the geologist chose (a single-map view hides it without forgetting it)
 
 // ---------- built-in geological map ----------
 let geoLayer = null;
@@ -270,7 +271,27 @@ function openLayerSettings(layer, after = openLayersPanel) {
 export function invalidate() { if (map) setTimeout(() => map.invalidateSize(), 50); }
 
 // ---------- used by the Maps library screen ----------
-export const basemapName = () => BASEMAPS[baseKey].name;
+export const basemapName = () => BASEMAPS[savedBase].name;
+export const basemapList = () => Object.entries(BASEMAPS).filter(([, b]) => b.url).map(([key, b]) => ({ key, name: b.name, url: b.url, current: key === savedBase }));
+
+// Basemap view: the chosen base map with the geologist's maps that are switched on (and the geological map if on)
+export async function openBasemapMode(key) {
+  setBasemap(key || savedBase, true);
+  map.invalidateSize();
+  await reloadUserLayers();
+  const g = await db.get('meta', 'geoOverlay');
+  if (g && g.value && !geoLayer) await setGeoOverlay(true);
+}
+
+// Single-map view (Avenza style): only this map, no base map and no other layers; stations and GPS stay
+export async function openSingleMap(layer) {
+  setBasemap('none', false); // not remembered: Open basemap brings the base map back
+  hideAll(map);
+  if (geoLayer) { map.removeLayer(geoLayer); geoLayer = null; }
+  map.invalidateSize();
+  await showLayer(map, layer, true);
+  $('#title').textContent = layer.name;
+}
 export const geoOverlayOn = () => !!geoLayer;
 export async function showGeoOverlay(on) { await setGeoOverlay(on); }
 // make a layer visible and zoom to it
