@@ -20,7 +20,10 @@ function show(view) {
   // the library belongs to the Map tab
   const tabOf = v => (v === 'station' ? tabOf(previous) : v === 'library' ? 'map' : v);
   $$('#tabbar button').forEach(b => b.classList.toggle('active', b.dataset.view === tabOf(view)));
-  $('#btn-back').classList.toggle('hidden', view !== 'station');
+  // back button: on a station it returns to the previous screen; on the map it returns to the Maps library
+  $('#btn-back').classList.toggle('hidden', view !== 'station' && view !== 'map');
+  $('#btn-back').innerHTML = view === 'map' ? '&#8249; Maps' : '&#8249;';
+  $('#btn-back').classList.toggle('back-label', view === 'map');
   refresh();
 }
 
@@ -54,10 +57,14 @@ const nav = {
   },
 };
 
-$$('#tabbar button').forEach(b => b.addEventListener('click', () => show(b.dataset.view)));
+// tapping the Map tab while already on the map opens the library (and the other way round)
+$$('#tabbar button').forEach(b => b.addEventListener('click', () => {
+  if (b.dataset.view === 'map' && current === 'map') show('library');
+  else show(b.dataset.view);
+}));
 $('#btn-library').addEventListener('click', () => show('library'));
 setInterval(() => libraryGpsTick(current === 'library'), 5000); // keep "distance from you" up to date
-$('#btn-back').addEventListener('click', () => show(previous));
+$('#btn-back').addEventListener('click', () => show(current === 'map' ? 'library' : previous));
 
 on('stations', () => { if (current === 'stations') renderStationList(); });
 on('project', () => { $('#subtitle').textContent = state.project.name; });
