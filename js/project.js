@@ -5,6 +5,7 @@ import { $, esc, toast, openModal, closeModal, confirmBox, saveFile, fileStamp }
 import { UTM_ZONES } from './geo.js';
 import { AUTO_SOURCES, cloneSchema } from './schema.js';
 import { EXPORTS, runExport } from './export.js';
+import { fillEmptyForAll } from './station.js';
 
 const SETTINGS = [
   ['name', 'Project name (in the app)', 'text'],
@@ -28,6 +29,10 @@ export async function renderProject() {
       <div class="field"><label>Coordinate system</label><select id="pj-zone">${UTM_ZONES.map(z => `<option value="${z}" ${z === p.utmZone ? 'selected' : ''}>WGS 84 / UTM zone ${z}N (EPSG:326${z})</option>`).join('')}</select></div>
       <p class="muted">Tip: to auto-fill License, Prospect, Formation, Era… from where you stand, import the boundary or geology polygons in Map → Layers, then open the layer's ⋯ menu.</p>
     </div>
+    <div class="card"><h3>Fill empty boxes</h3>
+      <p class="muted">For all ${state.stations.length} stations: fills only the boxes that are still empty, from the settings above, the station position, your own map layers and the built-in geological map (Formation, Era, Period, Epoch, Age, main rock type, rock class). Nothing you typed is changed.</p>
+      <div class="btns"><button class="btn primary" id="pj-fill">Fill empty boxes now</button></div>
+      <p class="muted" id="pj-fill-result"></p></div>
     <div class="card"><h3>Station form</h3>
       <p class="muted">${p.schema.length} fields. Add, remove, rename fields, change dropdown lists and auto-fill sources.</p>
       <div class="btns"><button class="btn" id="pj-schema">Edit form fields</button></div></div>
@@ -71,6 +76,17 @@ export async function renderProject() {
     renderProject();
   };
   $('#pj-schema').onclick = () => openSchemaEditor();
+  $('#pj-fill').onclick = async () => {
+    const btn = $('#pj-fill'), out = $('#pj-fill-result');
+    btn.disabled = true;
+    try {
+      const r = await fillEmptyForAll((i, n) => { btn.textContent = `Filling… ${i} / ${n}`; });
+      const lines = Object.entries(r.fields).sort((a, b) => b[1] - a[1]).map(([k, c]) => `${esc(k)}: ${c}`);
+      out.innerHTML = r.stations ? `<b>${r.stations} station(s) updated.</b><br>${lines.join(' · ')}` : 'Nothing to fill: every box that can be filled already has a value.';
+      toast(r.stations ? `Filled empty boxes in ${r.stations} station(s)` : 'No empty boxes to fill');
+    } catch (e) { console.error(e); toast('Could not fill: ' + e.message, 4000); }
+    btn.disabled = false; btn.textContent = 'Fill empty boxes now';
+  };
   body.querySelectorAll('[data-exp]').forEach(r => r.onclick = async () => {
     toast('Preparing export…', 4000);
     try { await runExport(r.dataset.exp); } catch (e) { console.error(e); toast('Export failed: ' + e.message, 4000); }

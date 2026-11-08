@@ -5,7 +5,7 @@ import { $, $$, esc, toast, openModal, closeModal, confirmBox, fmt, resetViewpor
 import { toUTM, toDMS } from './geo.js';
 import { LITHOLOGIES, ALL_LITHOLOGIES } from './schema.js';
 import { autofillFromLayers } from './layers.js';
-import { geologyFill } from './geology.js';
+import { geologyFill, geologyAt } from './geology.js';
 import { findFormation, FORMATION_FILLS } from './strat.js';
 import { colourFieldHtml, bindColourField } from './colours.js';
 import { renderStationStructures } from './structures.js';
@@ -70,6 +70,51 @@ export async function createStation(fix) {
   await saveStation(st);
   toast(`${code} created`);
   nav.openStation(st.id);
+}
+
+// Fill every EMPTY box of every station: project settings (Region, License, Project, Prospect…), position
+// fields, and from the built-in geological map Formation, Era, Period, Epoch, Age, the map's main rock type
+// and Rock class. The geologist's own imported layers come first. Nothing already typed is changed.
+// Returns { stations: n changed, fields: { label: count } }.
+export async function fillEmptyForAll(onProgress) {
+  const schema = state.project.schema;
+  const keys = new Set(schema.map(f => f.key));
+  const label = Object.fromEntries(schema.map(f => [f.key, f.label.replace(/^\d+\.\s*/, '')]));
+  const lithField = schema.find(f => f.key === 'lithology');
+  const lithOptions = (lithField && lithField.options) || [];
+  const summary = { stations: 0, fields: {} };
+  let n = 0;
+  for (const st of state.stations) {
+    n++; if (onProgress) onProgress(n, state.stations.length);
+    if (st.lat == null) continue;
+    const before = { ...st.attrs };
+    const offer = {}; // candidate values; used only where the box is empty
+    for (const f of schema) if (f.auto) { const v = autoValue(f.auto, st); if (f.auto !== 'sample_no' && v !== '' && v != null) offer[f.key] = v; }
+    Object.assign(offer, await geologyFill(st.lat, st.lon));
+    Object.assign(offer, await autofillFromLayers(st.lat, st.lon));
+    const unit = await geologyAt(st.lat, st.lon).catch(() => null);
+    if (unit) {
+      // the map's main rock: the first rock name in its lithology text, e.g. "Sandstone, shale, minor limestone" -> Sandstone
+      const text = String(unit.lith || '').toLowerCase();
+      let best = null, at = 1e9;
+      for (const o of lithOptions) { const m = new RegExp('\\b' + o.toLowerCase().replace(/[()]/g, '') + '\\b').exec(text); if (m && m.index < at) { at = m.index; best = o; } }
+      if (best) offer.lithology = best;
+      if (unit.formation && unit.formation !== 'Basement') offer.rock_class = 'Sedimentary';
+    }
+    for (const [k, v] of Object.entries(offer)) {
+      if (!keys.has(k) || v === '' || v == null) continue;
+      if (st.attrs[k] === undefined || st.attrs[k] === null || st.attrs[k] === '') st.attrs[k] = v;
+    }
+    fillFromFormation(st, true); // Era / Period / Epoch / Age of the formation, where still empty
+    if (before.member) st.attrs.member = before.member; // never clear a member the geologist typed
+    const changed = Object.keys(st.attrs).filter(k => (before[k] ?? '') === '' && (st.attrs[k] ?? '') !== '');
+    if (changed.length) {
+      summary.stations++;
+      changed.forEach(k => { summary.fields[label[k] || k] = (summary.fields[label[k] || k] || 0) + 1; });
+      await saveStation(st);
+    }
+  }
+  return summary;
 }
 
 // Era / Period / Epoch / Age from the formation library. Returns the keys it changed.
