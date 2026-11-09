@@ -110,4 +110,29 @@ export const DEFAULT_SCHEMA = [
   { key: 'vein_type', label: 'Vein type', type: 'select', group: 'Mineralization', options: ['None', 'Quartz', 'Quartz-carbonate', 'Carbonate', 'Sulphide', 'Stockwork', 'Sheeted', 'Breccia'] },
 ];
 
-export function cloneSchema() { return JSON.parse(JSON.stringify(DEFAULT_SCHEMA)); }
+// Three of each: a station can show up to three alteration types, vein types and mineralizations.
+// Adds "<key>_2" and "<key>_3" right after the field, copying its type and list; the first becomes "… 1".
+// Used for new projects and to upgrade projects created before (fields the geologist removed are not added back).
+const TRIPLES = ['alteration', 'mineralization', 'vein_type'];
+export function addTriples(schema) {
+  let changed = false;
+  for (const key of TRIPLES) {
+    const i = schema.findIndex(f => f.key === key);
+    if (i < 0) continue;
+    const base = schema[i], name = base.label.replace(/\s*1$/, '');
+    if (!/\s1$/.test(base.label)) { base.label = `${name} 1`; changed = true; }
+    let at = i;
+    for (const n of [2, 3]) {
+      const k = `${key}_${n}`;
+      const j = schema.findIndex(f => f.key === k);
+      if (j >= 0) { at = j; continue; }
+      const copy = JSON.parse(JSON.stringify(base));
+      Object.assign(copy, { key: k, label: `${name} ${n}` });
+      delete copy.auto;
+      schema.splice(at + 1, 0, copy); at++; changed = true;
+    }
+  }
+  return changed;
+}
+
+export function cloneSchema() { const s = JSON.parse(JSON.stringify(DEFAULT_SCHEMA)); addTriples(s); return s; }

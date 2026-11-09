@@ -220,7 +220,7 @@ async function openLayersPanel() {
     if (created.length) toast(`Imported ${created.length} layer(s)`);
     openLayersPanel();
   });
-  body.querySelectorAll('.layer-row').forEach(row => {
+  body.querySelectorAll('.layer-row[data-id]').forEach(row => { // (the geological-map row has its own switch)
     const layer = layers.find(l => l.id === row.dataset.id);
     row.querySelector('.lv').addEventListener('change', async e => {
       layer.visible = e.target.checked;

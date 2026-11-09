@@ -6,6 +6,74 @@ import { UTM_ZONES } from './geo.js';
 import { AUTO_SOURCES, cloneSchema } from './schema.js';
 import { EXPORTS, runExport } from './export.js';
 import { fillEmptyForAll } from './station.js';
+import { importFiles, projectLayers, attributeNames, hideLayer } from './layers.js';
+import { map } from './mapview.js';
+
+// ---------- auto-fill files: one polygon file per field (Region, License, Prospect, Formation) ----------
+// A station takes the attribute value of the polygon its GPS position falls in. The geologist's files win over
+// the built-in geological map. Files are kept on the phone (not drawn on the map unless switched on in ☰).
+const SLOTS = [
+  ['region', 'Region', /region|emirate|province|adm1|mintaqa/i],
+  ['license', 'License', /licen|lic_|permit|concession|lease/i],
+  ['prospect', 'Prospect', /prospect|target|block/i],
+  ['formation', 'Formation', /^formation_?$|formation|fm|unit|geol/i],
+];
+// the column to read: one whose name fits (e.g. "LICENSE"), preferring full names over short codes
+// (in Fomation_Platforme.shp, "Formation_" = "Minjur" beats "Formation" = "MNJ")
+function guessAttribute(layer, re) {
+  const names = attributeNames(layer).filter(n => !/area|leng|^fid$|^id$|objectid/i.test(n));
+  const feats = (layer.geojson.features || []).slice(0, 300);
+  const avgLen = n => { const v = feats.map(f => f.properties && f.properties[n]).filter(x => typeof x === 'string' && x); return v.length ? v.reduce((s, x) => s + x.length, 0) / v.length : 0; };
+  const best = list => list.sort((a, b) => avgLen(b) - avgLen(a))[0];
+  return best(names.filter(n => re.test(n))) || best(names.filter(n => /name/i.test(n))) || names[0] || '';
+}
+async function slotsHtml() {
+  const layers = await projectLayers();
+  return SLOTS.map(([key, label]) => {
+    const l = layers.find(x => x.slot === key);
+    const attrs = l ? attributeNames(l) : [];
+    const attr = l && l.autofill ? l.autofill[key] : '';
+    const sample = l ? [...new Set((l.geojson.features || []).map(f => f.properties && f.properties[attr]).filter(v => v != null && v !== ''))].slice(0, 3).join(', ') : '';
+    return `<div class="slot" data-key="${key}">
+      <div class="slot-head"><b>${label}</b>
+        <label class="btn small ${l ? '' : 'primary'}">${l ? 'Replace' : 'Upload file'}<input type="file" multiple class="hidden slot-file"></label>
+        ${l ? '<button class="btn small danger slot-del">Remove</button>' : ''}</div>
+      ${l ? `<div class="muted">${esc(l.name)} · ${(l.geojson.features || []).length} polygons</div>
+        <div class="field" style="margin:6px 0 0"><label>Take the ${label} from the column</label>
+        <select class="slot-attr">${attrs.map(a => `<option ${a === attr ? 'selected' : ''}>${esc(a)}</option>`).join('')}</select></div>
+        <div class="muted">e.g. ${esc(sample || '—')}</div>` : '<div class="muted">No file yet</div>'}</div>`;
+  }).join('');
+}
+async function bindSlots(card) {
+  card.querySelector('#pj-slots').innerHTML = await slotsHtml();
+  const layers = await projectLayers();
+  card.querySelectorAll('.slot').forEach(row => {
+    const [key, label, re] = SLOTS.find(s => s[0] === row.dataset.key);
+    const old = layers.find(x => x.slot === key);
+    row.querySelector('.slot-file').onchange = async e => {
+      toast(`Reading ${label} file…`);
+      const created = await importFiles(e.target.files);
+      // keep the layer with the most polygons; drop anything else that came in the same upload
+      const polys = l => (l.geojson && l.geojson.features || []).filter(f => f.geometry && /Polygon/.test(f.geometry.type)).length;
+      const pick = created.filter(l => l.kind === 'vector').sort((a, b) => polys(b) - polys(a))[0];
+      for (const l of created) if (l !== pick) await db.del('layers', l.id);
+      if (!pick || !polys(pick)) { if (pick) await db.del('layers', pick.id); toast('No polygons found in that file. Use a shapefile (.zip, or .shp + .dbf + .prj together), KML/KMZ or GeoJSON.', 5000); return; }
+      if (old) { hideLayer(map, old.id); await db.del('layers', old.id); }
+      hideLayer(map, pick.id);
+      Object.assign(pick, { slot: key, visible: false, autofill: { [key]: guessAttribute(pick, re) } });
+      await db.put('layers', pick);
+      toast(`${label} file ready: ${polys(pick)} polygons`);
+      bindSlots(card);
+    };
+    const del = row.querySelector('.slot-del');
+    if (del) del.onclick = async () => {
+      if (!(await confirmBox(`Remove the ${label} file? Stations already filled keep their values.`))) return;
+      hideLayer(map, old.id); await db.del('layers', old.id); bindSlots(card);
+    };
+    const sel = row.querySelector('.slot-attr');
+    if (sel) sel.onchange = async () => { old.autofill = { [key]: sel.value }; await db.put('layers', old); bindSlots(card); toast(`${label} now taken from ${sel.value}`); };
+  });
+}
 
 const SETTINGS = [
   ['name', 'Project name (in the app)', 'text'],
@@ -29,6 +97,9 @@ export async function renderProject() {
       <div class="field"><label>Coordinate system</label><select id="pj-zone">${UTM_ZONES.map(z => `<option value="${z}" ${z === p.utmZone ? 'selected' : ''}>WGS 84 / UTM zone ${z}N (EPSG:326${z})</option>`).join('')}</select></div>
       <p class="muted">Tip: to auto-fill License, Prospect, Formation, Era… from where you stand, import the boundary or geology polygons in Map → Layers, then open the layer's ⋯ menu.</p>
     </div>
+    <div class="card" id="pj-slots-card"><h3>Auto-fill from your files</h3>
+      <p class="muted">Upload one polygon file for each: shapefile (.zip, or .shp + .dbf + .prj + .cpg picked together), KML/KMZ or GeoJSON. New stations take the value of the polygon they are in, from GPS. Then use “Fill empty boxes now” below for stations you already have.</p>
+      <div id="pj-slots"></div></div>
     <div class="card"><h3>Fill empty boxes</h3>
       <p class="muted">For all ${state.stations.length} stations: fills only the boxes that are still empty, from the settings above, the station position, your own map layers and the built-in geological map (Formation, Era, Period, Epoch, Age, main rock type, rock class). Nothing you typed is changed.</p>
       <div class="btns"><button class="btn primary" id="pj-fill">Fill empty boxes now</button></div>
@@ -76,6 +147,7 @@ export async function renderProject() {
     renderProject();
   };
   $('#pj-schema').onclick = () => openSchemaEditor();
+  bindSlots($('#pj-slots-card'));
   $('#pj-fill').onclick = async () => {
     const btn = $('#pj-fill'), out = $('#pj-fill-result');
     btn.disabled = true;

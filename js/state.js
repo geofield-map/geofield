@@ -1,6 +1,6 @@
 // App-wide state: current project, its stations, and the latest GPS fix.
 import { db, uid } from './db.js';
-import { cloneSchema } from './schema.js';
+import { cloneSchema, addTriples } from './schema.js';
 
 const listeners = {};
 export function on(evt, fn) { (listeners[evt] = listeners[evt] || []).push(fn); }
@@ -46,6 +46,7 @@ function upgradeSchema(project) {
     const d = defaults.find(x => x.key === f.key);
     if (d && d.type === 'colour' && f.type === 'text') f.type = 'colour';
   }
+  addTriples(project.schema); // Alteration / Mineralization / Vein type 1, 2, 3
 }
 
 export async function saveProject() {
