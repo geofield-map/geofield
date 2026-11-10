@@ -215,3 +215,7 @@ table.tbl th { color: var(--muted); font-weight: 500; font-size: 12px; }
 .slot-head { display: flex; align-items: center; gap: 8px; }
 .slot-head b { flex: 1; font-size: 16px; }
 .slot .muted { margin-top: 4px; }
+
+/* export station picker */
+.ex-dayhead { background: var(--bg3); margin-top: 8px; padding-left: 8px !important; border-radius: 8px; }
+.ex-st { padding-left: 14px !important; }

@@ -9,6 +9,41 @@ import { fillEmptyForAll } from './station.js';
 import { importFiles, projectLayers, attributeNames, hideLayer } from './layers.js';
 import { map } from './mapview.js';
 
+// ---------- export: choose the stations first (all ticked), grouped by field day ----------
+function exportPicker(kind) {
+  const list = state.stations.filter(s => s.lat != null).slice().sort((a, b) => (b.created || '').localeCompare(a.created || ''));
+  if (!list.length) { toast('No stations with a position to export'); return; }
+  const day = s => (s.created || '').slice(0, 10) || 'No date';
+  const days = [...new Set(list.map(day))];
+  const body = openModal(`Export · ${EXPORTS[kind].label}`, `
+    <div class="btns" style="margin-top:0"><button class="btn small" id="ex-all">Select all</button><button class="btn small" id="ex-none">Select none</button></div>
+    <input type="search" id="ex-q" placeholder="Filter: station, formation, sample…" style="width:100%;margin:6px 0 4px">
+    <div id="ex-list">${days.map(d => `<div class="ex-day" data-day="${d}">
+      <label class="check bm-layer ex-dayhead"><input type="checkbox" class="ex-dayall" checked> <b>${esc(d)}</b> <span class="muted">${list.filter(s => day(s) === d).length} stations</span></label>
+      ${list.filter(s => day(s) === d).map(s => `<label class="check bm-layer ex-st" data-q="${esc([s.code, s.attrs.formation, s.attrs.lithology, s.attrs.sample_no, s.attrs.remarks].filter(Boolean).join(' ').toLowerCase())}">
+        <input type="checkbox" data-id="${s.id}" checked> ${esc(s.code)} <span class="muted">${esc([s.attrs.formation, s.attrs.lithology].filter(Boolean).join(' · '))}</span></label>`).join('')}</div>`).join('')}</div>
+    <div class="btns"><button class="btn primary" id="ex-go">Export</button></div>`);
+  const boxes = () => [...body.querySelectorAll('input[data-id]')];
+  const count = () => { const n = boxes().filter(b => b.checked).length; body.querySelector('#ex-go').textContent = `Export ${n} station${n === 1 ? '' : 's'}`; };
+  const syncDays = () => body.querySelectorAll('.ex-day').forEach(d => { d.querySelector('.ex-dayall').checked = [...d.querySelectorAll('input[data-id]')].every(b => b.checked); });
+  body.querySelector('#ex-all').onclick = () => { boxes().forEach(b => { b.checked = true; }); syncDays(); count(); };
+  body.querySelector('#ex-none').onclick = () => { boxes().forEach(b => { b.checked = false; }); syncDays(); count(); };
+  body.querySelectorAll('.ex-dayall').forEach(c => c.onchange = () => { c.closest('.ex-day').querySelectorAll('input[data-id]').forEach(b => { b.checked = c.checked; }); count(); });
+  boxes().forEach(b => b.onchange = () => { syncDays(); count(); });
+  body.querySelector('#ex-q').oninput = e => {
+    const q = e.target.value.toLowerCase().trim();
+    body.querySelectorAll('.ex-st').forEach(l => { l.style.display = !q || l.dataset.q.includes(q) ? '' : 'none'; });
+  };
+  body.querySelector('#ex-go').onclick = async () => {
+    const ids = boxes().filter(b => b.checked).map(b => b.dataset.id);
+    if (!ids.length) { toast('Select at least one station'); return; }
+    closeModal();
+    toast(`Preparing ${EXPORTS[kind].label} for ${ids.length} station(s)…`, 4000);
+    try { await runExport(kind, ids); } catch (e) { console.error(e); toast('Export failed: ' + e.message, 4000); }
+  };
+  count();
+}
+
 // ---------- auto-fill files: one polygon file per field (Region, License, Prospect, Formation) ----------
 // A station takes the attribute value of the polygon its GPS position falls in. The geologist's files win over
 // the built-in geological map. Files are kept on the phone (not drawn on the map unless switched on in ☰).
@@ -159,10 +194,7 @@ export async function renderProject() {
     } catch (e) { console.error(e); toast('Could not fill: ' + e.message, 4000); }
     btn.disabled = false; btn.textContent = 'Fill empty boxes now';
   };
-  body.querySelectorAll('[data-exp]').forEach(r => r.onclick = async () => {
-    toast('Preparing export…', 4000);
-    try { await runExport(r.dataset.exp); } catch (e) { console.error(e); toast('Export failed: ' + e.message, 4000); }
-  });
+  body.querySelectorAll('[data-exp]').forEach(r => r.onclick = () => exportPicker(r.dataset.exp));
   $('#pj-backup').onclick = backup;
   $('#pj-restore').onchange = e => restore(e.target.files[0]);
   if (navigator.storage && navigator.storage.estimate) {

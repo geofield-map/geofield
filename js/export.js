@@ -32,7 +32,9 @@ function row(st) {
   return r;
 }
 
-const stations = () => state.stations.filter(s => s.lat != null);
+// Stations to export: all with a position, or only those the geologist ticked (see runExport's ids)
+let only = null;
+const stations = () => state.stations.filter(s => s.lat != null && (!only || only.has(s.id)));
 const baseName = () => (state.project.name || 'project').replace(/[^\w-]+/g, '_');
 
 // ---------- CSV ----------
@@ -320,7 +322,13 @@ export const EXPORTS = {
   geojson: { label: 'GeoJSON', desc: 'Web maps, QGIS' },
 };
 
-export async function runExport(kind) {
+// ids: the station ids to export (all stations when left out)
+export async function runExport(kind, ids) {
+  only = ids ? new Set(ids) : null;
+  try { await exportNow(kind); } finally { only = null; }
+}
+
+async function exportNow(kind) {
   const name = `${baseName()}_${fileStamp()}`;
   if (!stations().length) throw new Error('No stations to export');
   switch (kind) {
