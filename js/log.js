@@ -16,6 +16,8 @@ export const LITH_GROUPS = [
   ['Clastics', ['Conglomerate', 'Breccia', 'Diamictite', 'Sandstone', 'Sandstone (bedded)', 'Arkose', 'Greywacke', 'Quartz arenite',
     'Siltstone', 'Siltstone (irregular)', 'Silty clay, Mudstone', 'Mudstone', 'Shale-Claystone', 'Shale', 'Claystone', 'Tillite']],
   ['Evaporites & chemical', ['Anhydrite', 'Gypsum', 'Salts', 'Halite', 'Evaporite', 'Chert', 'Ironstone', 'Phosphorite', 'Coal']],
+  ['Igneous & metamorphic', ['Granite', 'Granodiorite', 'Diorite', 'Gabbro', 'Syenite', 'Pegmatite', 'Aplite', 'Porphyry', 'Dolerite', 'Basalt',
+    'Andesite', 'Rhyolite', 'Quartz vein', 'Carbonate vein', 'Schist', 'Gneiss', 'Marble', 'Quartzite', 'Hornfels', 'Skarn']],
   ['Other', ['Volcanics', 'Igneous (intrusive)', 'Metamorphic', 'Basement', 'Dune sand', 'Rootlets / palaeosol', 'Covered / no exposure']],
 ];
 const LOG_LITHS = [...new Set([...LITH_GROUPS.flatMap(g => g[1]), ...CHART_LITHOLOGIES, ...LITHOLOGIES.Sedimentary])];
@@ -56,6 +58,10 @@ function patternFor(lith = '') {
   if (l.includes('coal')) return 'p-coal';
   if (l.includes('volcan')) return 'p-volc';
   if (l.includes('igneous')) return 'p-ign';
+  // intrusive, volcanic and metamorphic rocks (for intrusions and dykes cutting the beds)
+  if (/granit|granodior|tonalit|monzonit|syenit|diorit|gabbr|pegmat|aplit|porphyr|anorthos|peridot|pyroxen|dunit/.test(l)) return 'p-ign';
+  if (/basalt|dolerit|andesit|rhyolit|dacit|trachyt|tuff|ignimbr|agglomer|lamproph/.test(l)) return 'p-volc';
+  if (/schist|gneiss|marble|quartzite|amphibol|hornfels|skarn|slate|phyllit|migmat|mylonit|serpentin|metased|metavolc|metabas/.test(l)) return 'p-meta';
   if (l.includes('metamorphic')) return 'p-meta';
   if (l.includes('iron') || l.includes('phosph')) return 'p-sand';
   return 'p-blank';
@@ -436,6 +442,52 @@ function bedPath(shape, x0, x1, y, h) {
   }
 }
 
+// ---------- bodies that cut across the beds: intrusion, dyke, vein, fault ----------
+export const BODY_KINDS = ['Intrusion', 'Dyke', 'Vein', 'Fault'];
+// y on the drawing for a height in metres above the base of the log (beds can be drawn at a minimum height)
+function yAtHeight(m, beds, rows) {
+  let base = 0;
+  for (let i = 0; i < beds.length; i++) {
+    const th = Number(beds[i].thickness) || 0, r = rows.find(x => x.i === i);
+    if (!r) { base += th; continue; }
+    if (m <= base + th || i === beds.length - 1) return r.y + r.h - (Math.max(0, Math.min(th, m - base)) / (th || 1)) * r.h;
+    base += th;
+  }
+  return rows.length ? rows[0].y : 0;
+}
+function bodiesSvg(bodies, beds, rows, paths, colX, colW) {
+  if (!bodies.length || !rows.length) return '';
+  let s = `<clipPath id="bodyclip">${paths.map(d => `<path d="${d}"/>`).join('')}</clipPath><g clip-path="url(#bodyclip)">`;
+  let labels = '';
+  for (const x of bodies) {
+    const y0 = yAtHeight(Number(x.from) || 0, beds, rows), y1 = yAtHeight(Number(x.to) || 0, beds, rows); // y0 base, y1 top (y1 < y0)
+    const cx = colX + colW * (Number(x.pos ?? 50) / 100), w = colW * (Number(x.width ?? 30) / 100);
+    // lean: the top shifted sideways, in % of the column (the log's width is grain size, not metres, so no angle)
+    const shift = colW * (Math.max(-60, Math.min(60, Number(x.tilt) || 0)) / 100);
+    const pat = patternFor(x.lithology), fill = DEFAULT_FILL[pat] || '#f4b6b6';
+    if (x.kind === 'Fault') {
+      s += `<line x1="${(cx - shift / 2).toFixed(1)}" y1="${y0.toFixed(1)}" x2="${(cx + shift / 2).toFixed(1)}" y2="${y1.toFixed(1)}" stroke="#d00" stroke-width="2.2"/>`;
+      const my = (y0 + y1) / 2; // half-arrows showing the sense of movement
+      s += `<path d="M${cx + 4} ${my - 8}v12l-3 -4M${cx - 4} ${my + 8}v-12l3 4" fill="none" stroke="#d00" stroke-width="1.2"/>`;
+    } else {
+      let d;
+      if (x.kind === 'Intrusion') {
+        // plug rising from its base, rounded (dome) top, sides slightly irregular
+        const l = cx - w / 2, r = cx + w / 2, top = y1, rr = Math.min(w / 2, (y0 - y1) * 0.35);
+        d = `M${l - w * 0.08} ${y0}C${l - w * 0.02} ${(y0 + top) / 2 + (y0 - top) * 0.15} ${l + w * 0.04} ${top + rr * 1.4} ${l + w * 0.12 + shift} ${top + rr}`
+          + `Q${cx + shift} ${top - rr * 0.35} ${r - w * 0.1 + shift} ${top + rr * 0.8}`
+          + `C${r + w * 0.04} ${top + rr * 1.6} ${r - w * 0.02} ${(y0 + top) / 2} ${r + w * 0.06} ${y0}Z`;
+      } else {
+        const ww = x.kind === 'Vein' ? Math.max(2, w * 0.4) : Math.max(4, w);
+        d = `M${cx - ww / 2} ${y0}L${cx - ww / 2 + shift} ${y1}L${cx + ww / 2 + shift} ${y1}L${cx + ww / 2} ${y0}Z`;
+      }
+      s += `<path d="${d}" fill="${fill}"/><path d="${d}" fill="url(#${pat}${isDark(fill) ? '-l' : ''})" stroke="#000" stroke-width="1.2"/>`;
+    }
+    if (x.label) labels += `<text x="${(cx + shift / 2).toFixed(1)}" y="${((y0 + y1) / 2 + 3).toFixed(1)}" font-size="9" font-weight="bold" text-anchor="middle" paint-order="stroke" stroke="#fff" stroke-width="2.5">${esc(x.label)}</text>`;
+  }
+  return s + '</g>' + labels;
+}
+
 // Era / period / epoch / stage of a bed: from its formation, else from the station.
 function chronoOf(bed, st) {
   const fm = findFormation(bed.formation || st.attrs.formation);
@@ -527,7 +579,10 @@ export function logSvg(st) {
     if (b.lithology) addLith(b.lithology, bedColours(b, DEFAULT_FILL[patternFor(b.lithology)]));
     (b.inter || []).forEach(n => addLith(n));
   }
+  const bodies = (st.log && st.log.bodies) || [];
+  bodies.forEach(x => { if (x.kind !== 'Fault' && x.lithology) addLith(x.lithology); });
   const contacts = [...new Set(beds.map(b => b.contact).filter(c => ['Erosional', 'Unconformity', 'Gradational', 'Faulted'].includes(c)))];
+  if (bodies.some(x => x.kind === 'Fault') && !contacts.includes('Faulted')) contacts.push('Faulted');
   const mods = [...new Set(beds.flatMap(b => b.modifiers || []))].filter(m => MOD_GLYPH[m]);
   const anyEstimated = beds.some(b => b.estimated);
   const syms = [...new Set(beds.flatMap(b => b.structSyms || []))].filter(n => STRUCT_GLYPH[n]);
@@ -578,6 +633,7 @@ export function logSvg(st) {
   };
   cols.forEach(([label, valueOf, colourOf], c) => { s += unitCol(label, valueOf, colourOf, 2 + c * 17, 16); });
 
+  const bedPaths = [], bedRows = [];
   for (const i of order) {
     const b = beds[i], h = heights[i];
     const w = minW + stepW * grainIndex(b);
@@ -586,6 +642,7 @@ export function logSvg(st) {
     const pat = patternFor(b.lithology);
     const bc = bedColours(b, DEFAULT_FILL[pat]), fill = bc.c1;
     const d =wTop !== w ? `M${colX} ${y}H${colX + wTop}L${colX + w} ${y + h}H${colX}Z` : bedPath(b.shape, colX, colX + w, y, h);
+    bedPaths.push(d); bedRows.push({ i, y, h, w: Math.max(w, wTop) }); // for bodies that cut across the beds
     const inter = (b.inter || []).filter(Boolean);
     if (inter.length) {
       // interbedded: thin alternating stripes of each lithology, clipped to the bed outline
@@ -646,6 +703,8 @@ export function logSvg(st) {
     y += h;
   }
   s += `<line x1="${colX - 14}" y1="${y}" x2="${colX - 10}" y2="${y}" stroke="#000"/><text x="${colX - 16}" y="${y + 4}" font-size="9" text-anchor="end">0</text>`;
+  // positions across are measured on the log's own column (its widest bed)
+  s += bodiesSvg(bodies, beds, bedRows, bedPaths, colX, Math.max(minW, ...bedRows.map(r => r.w)));
   // grain-size scale
   const gx = i => colX + minW + stepW * i;
   GRAIN_ABBR.forEach((a, i) => {
@@ -741,6 +800,10 @@ export function renderLog() {
       ${beds.map((b, i) => ({ b, i })).reverse().map(({ b, i }) => `<tr data-i="${i}"><td>${i + 1}</td><td>${esc(b.lithology ? bedName(b) : '')}${b.formation || b.unit ? `<div class="muted">${esc([b.formation, b.member, b.unit].filter(Boolean).join(' / '))}</div>` : ''}</td><td>${b.estimated ? '~' : ''}${esc(b.thickness)}</td><td>${esc((isCarbonate(b.lithology) && b.texture ? [b.texture, b.textureTop] : [b.grain, b.grainTop]).filter(Boolean).join(' → '))}</td></tr>`).join('')}
       </table><p class="muted">Bed 1 is the base. Tap a bed to edit or copy it · press and hold a bed to move it.</p>
       <div class="btns"><button class="btn" id="lg-repeat">Repeat beds…</button></div>
+      <div class="group-title">Intrusions, dykes, veins, faults</div>
+      ${(st.log.bodies || []).map((x, k) => `<div class="layer-row body-row" data-k="${k}"><div class="nm">${esc(x.kind)} · ${esc(x.lithology || (x.kind === 'Fault' ? 'fault' : ''))}${x.label ? ' · ' + esc(x.label) : ''}
+        <div class="muted">${esc(x.from)}–${esc(x.to)} m</div></div><span>›</span></div>`).join('') || '<p class="muted" style="margin:4px 0">None. Add a body that cuts across the beds (e.g. a granite intrusion rising from the basement).</p>'}
+      <div class="btns"><button class="btn" id="lg-body">+ Add intrusion / dyke / vein / fault</button></div>
       <div class="btns"><button class="btn" id="lg-pdf">Export PDF</button><button class="btn" id="lg-png">Export PNG</button><button class="btn" id="lg-svg">Export SVG</button></div></div>`
     : '<div class="empty">No beds yet. Start from the base of the section and add beds upward.</div>'}`;
   $('#lg-add').onclick = () => editBed(st, null);
@@ -750,6 +813,8 @@ export function renderLog() {
   const svgBtn = $('#lg-svg');
   if (svgBtn) {
     $('#lg-repeat').onclick = () => repeatBeds(st);
+    $('#lg-body').onclick = () => editBody(st, null);
+    body.querySelectorAll('.body-row').forEach(r => r.onclick = () => editBody(st, Number(r.dataset.k)));
     svgBtn.onclick = () => saveFile(new Blob([logSvg(st)], { type: 'image/svg+xml' }), `${st.code}_log.svg`);
     $('#lg-png').onclick = () => exportPng(st);
     $('#lg-pdf').onclick = () => exportPdf(st);
@@ -825,6 +890,45 @@ function bindBedRow(row, st) {
 }
 
 const bedLabel = (b, n) => `${n}. ${b.lithology || 'Bed'}${b.thickness ? ' · ' + b.thickness + ' m' : ''}`;
+
+// add / edit a body cutting across the beds
+function editBody(st, k) {
+  const total = st.log.beds.reduce((a, b) => a + (Number(b.thickness) || 0), 0);
+  const list = st.log.bodies = st.log.bodies || [];
+  const x = k == null ? { kind: 'Intrusion', lithology: 'Granite', from: 0, to: Math.round(total * 0.6 * 10) / 10, pos: 50, width: 40, tilt: 0, label: '' } : { ...list[k] };
+  const DEF_W = { Intrusion: 40, Dyke: 8, Vein: 3, Fault: 0 };
+  const body = openModal(k == null ? 'Add intrusion / dyke / vein / fault' : x.kind, `
+    <div class="field"><label>Type</label><select id="bo-kind">${BODY_KINDS.map(t => `<option ${t === x.kind ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
+    <div class="field" id="bo-lith-f"><label>Lithology</label>${visualFieldHtml('lith', 'bo-lith', x.lithology)}</div>
+    <div class="grid2">
+      <div class="field"><label>From (m above base)</label><input type="number" inputmode="decimal" step="any" id="bo-from" value="${esc(x.from)}"></div>
+      <div class="field"><label>To (m above base)</label><input type="number" inputmode="decimal" step="any" id="bo-to" value="${esc(x.to)}"></div>
+      <div class="field"><label>Position across (%)</label><input type="range" id="bo-pos" min="0" max="100" value="${esc(x.pos)}" style="width:100%"></div>
+      <div class="field" id="bo-w-f"><label>Width (%)</label><input type="range" id="bo-w" min="1" max="100" value="${esc(x.width)}" style="width:100%"></div>
+      <div class="field"><label>Lean (top to the left − / right +)</label><input type="range" id="bo-tilt" min="-50" max="50" value="${esc(x.tilt || 0)}" style="width:100%"></div>
+      <div class="field"><label>Label in the log</label><input type="text" id="bo-label" value="${esc(x.label || '')}" placeholder="e.g. Granite plug"></div>
+    </div>
+    <p class="muted">The log has ${Math.round(total * 100) / 100} m. 0 m is the base of the log.</p>
+    <div class="btns"><button class="btn primary" id="bo-save">Save</button>${k != null ? '<button class="btn danger" id="bo-del">Delete</button>' : ''}</div>`);
+  body.querySelectorAll('.visual-field').forEach(bindVisualField);
+  const kind = body.querySelector('#bo-kind');
+  const sync = () => {
+    body.querySelector('#bo-lith-f').style.display = kind.value === 'Fault' ? 'none' : '';
+    body.querySelector('#bo-w-f').style.display = kind.value === 'Fault' ? 'none' : '';
+  };
+  kind.onchange = () => { body.querySelector('#bo-w').value = DEF_W[kind.value] || 10; if (kind.value === 'Vein' && /granit/i.test(body.querySelector('#bo-lith').value)) { /* keep */ } sync(); };
+  sync();
+  const v = id => body.querySelector(id).value;
+  body.querySelector('#bo-save').onclick = async () => {
+    const from = Number(v('#bo-from')), to = Number(v('#bo-to'));
+    if (!(to > from)) { toast('“To” must be higher than “From”'); return; }
+    const item = { kind: v('#bo-kind'), lithology: v('#bo-kind') === 'Fault' ? '' : v('#bo-lith'), from, to, pos: Number(v('#bo-pos')), width: Number(v('#bo-w')), tilt: Number(v('#bo-tilt')) || 0, label: v('#bo-label').trim() };
+    if (k == null) list.push(item); else list[k] = item;
+    await saveStation(st); closeModal(); renderLog();
+  };
+  const del = body.querySelector('#bo-del');
+  if (del) del.onclick = async () => { list.splice(k, 1); await saveStation(st); closeModal(); renderLog(); };
+}
 
 // ---------- build a log from field stations ----------
 // One bed per chosen station (lithology, formation, member, grain size, structures, cement, fossils, remarks,
