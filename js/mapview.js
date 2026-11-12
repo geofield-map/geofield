@@ -8,7 +8,7 @@ import {
   importFiles, projectLayers, showLayer, hideLayer, hideAll, zoomToLayer, setOpacity, attributeNames, VECTOR_COLORS,
 } from './layers.js';
 import { loadGeology, geologyAt, unitColour } from './geology.js';
-import { startSectionPick } from './section.js';
+import { sectionMenu } from './section.js';
 
 const BASEMAPS = {
   imagery: { name: 'Satellite (Esri)', url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', attr: 'Esri World Imagery', maxNativeZoom: 19 },
@@ -46,7 +46,7 @@ export function initMap(h) {
     $('#btn-crosshair').classList.toggle('on', crosshairOn);
   });
   $('#btn-layers').addEventListener('click', openLayersPanel);
-  $('#btn-section').addEventListener('click', () => startSectionPick(map));
+  $('#btn-section').addEventListener('click', () => sectionMenu(map));
   $('#btn-add-gps').addEventListener('click', () => {
     if (!state.gps) { toast('No GPS fix yet. Use the crosshair to place the point.'); return; }
     handlers.addPoint({ ...state.gps, source: 'GPS' });

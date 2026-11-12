@@ -5,13 +5,78 @@
 // until it meets the ground; it takes the formation found there. Stations near the line are projected on it.
 /* global L */
 import { state } from './state.js';
-import { $, esc, toast, openModal, saveFile, loadScript } from './ui.js';
+import { $, esc, toast, openModal, closeModal, saveFile, loadScript } from './ui.js';
 import { geologyAt, unitColour } from './geology.js';
 import { autofillFromLayers } from './layers.js';
 import { formationColour } from './strat.js';
 import { JSPDF_URL, SVG2PDF_URL } from './log.js';
 
 const R = Math.PI / 180;
+
+// ---------- ✂ on the map: draw A–B, or build the section from chosen stations ----------
+export function sectionMenu(map) {
+  if (picking) { picking.cancel(); return; }
+  const body = openModal('Cross-section', `
+    <div class="btns" style="flex-direction:column;margin-top:0">
+      <button class="btn primary" id="sm-draw">Draw A–B on the map</button>
+      <button class="btn" id="sm-st">Choose stations</button></div>
+    <p class="muted">Choose stations: the section follows your traverse and shows only those stations, with their bedding dips.</p>`);
+  body.querySelector('#sm-draw').onclick = () => { closeModal(); startSectionPick(map); };
+  body.querySelector('#sm-st').onclick = () => { closeModal(); stationsDialog(); };
+}
+
+function stationsDialog() {
+  const list = state.stations.filter(s => s.lat != null && !s.isLog).slice().sort((a, b) => (b.created || '').localeCompare(a.created || ''));
+  if (list.length < 2) { toast('You need at least 2 stations with a position'); return; }
+  const day = s => (s.created || '').slice(0, 10) || 'No date';
+  const days = [...new Set(list.map(day))];
+  const body = openModal('Section from stations', `
+    <div class="btns" style="margin-top:0"><button class="btn small" id="ss-all">Select all</button><button class="btn small" id="ss-none">Select none</button></div>
+    <div style="max-height:40vh;overflow:auto">${days.map(d => `<div class="ex-day">
+      <label class="check bm-layer ex-dayhead"><input type="checkbox" class="ss-day" ${d === days[0] ? 'checked' : ''}> <b>${esc(d)}</b></label>
+      ${list.filter(s => day(s) === d).map(s => `<label class="check bm-layer ex-st"><input type="checkbox" data-id="${s.id}" ${d === days[0] ? 'checked' : ''}> ${esc(s.code)}
+        <span class="muted">${esc([s.attrs.formation, s.attrs.lithology].filter(Boolean).join(' · '))}</span></label>`).join('')}</div>`).join('')}</div>
+    <div class="field"><label>Section line</label><select id="ss-line">
+      <option value="fit">Best-fit line through the stations</option><option value="ends">From the first to the last station (time taken)</option></select></div>
+    <div class="btns"><button class="btn primary" id="ss-go">Build section</button></div>`);
+  const boxes = () => [...body.querySelectorAll('input[data-id]')];
+  const count = () => { const n = boxes().filter(b => b.checked).length; body.querySelector('#ss-go').textContent = `Build section from ${n} station${n === 1 ? '' : 's'}`; };
+  body.querySelector('#ss-all').onclick = () => { body.querySelectorAll('input[type=checkbox]').forEach(b => { b.checked = true; }); count(); };
+  body.querySelector('#ss-none').onclick = () => { body.querySelectorAll('input[type=checkbox]').forEach(b => { b.checked = false; }); count(); };
+  body.querySelectorAll('.ss-day').forEach(c => c.onchange = () => { c.closest('.ex-day').querySelectorAll('input[data-id]').forEach(b => { b.checked = c.checked; }); count(); });
+  boxes().forEach(b => b.onchange = count);
+  body.querySelector('#ss-go').onclick = () => {
+    const chosen = boxes().filter(b => b.checked).map(b => list.find(s => s.id === b.dataset.id));
+    if (chosen.length < 2) { toast('Select at least 2 stations'); return; }
+    const [a, b] = lineThrough(chosen, body.querySelector('#ss-line').value);
+    closeModal();
+    openSection(a, b, { only: new Set(chosen.map(s => s.id)) });
+  };
+  count();
+}
+
+// end points of the section for a set of stations, extended 10 % (at least 200 m) beyond the end stations
+function lineThrough(list, mode) {
+  const lat0 = list.reduce((s, x) => s + x.lat, 0) / list.length, lon0 = list.reduce((s, x) => s + x.lon, 0) / list.length;
+  const kx = 111320 * Math.cos(lat0 * R), ky = 110540;
+  const P = list.map(s => [(s.lon - lon0) * kx, (s.lat - lat0) * ky]);
+  let ux, uy;
+  if (mode === 'ends') {
+    const t = list.map((s, i) => [s.created || '', i]).sort((p, q) => p[0].localeCompare(q[0]));
+    const p0 = P[t[0][1]], p1 = P[t[t.length - 1][1]], L0 = Math.hypot(p1[0] - p0[0], p1[1] - p0[1]) || 1;
+    ux = (p1[0] - p0[0]) / L0; uy = (p1[1] - p0[1]) / L0;
+  } else {
+    // principal axis of the station cloud
+    let sxx = 0, syy = 0, sxy = 0;
+    P.forEach(([x, y]) => { sxx += x * x; syy += y * y; sxy += x * y; });
+    const th = 0.5 * Math.atan2(2 * sxy, sxx - syy); ux = Math.cos(th); uy = Math.sin(th);
+    if (ux < 0) { ux = -ux; uy = -uy; } // A in the west, B in the east
+  }
+  const proj = P.map(([x, y]) => x * ux + y * uy), lo = Math.min(...proj), hi = Math.max(...proj);
+  const ext = Math.max(200, (hi - lo) * 0.1);
+  const pt = t => ({ lat: lat0 + (t * uy) / ky, lon: lon0 + (t * ux) / kx });
+  return [pt(lo - ext), pt(hi + ext)];
+}
 
 // ---------- picking A and B on the map ----------
 let picking = null;
@@ -62,9 +127,11 @@ const apparentDip = (dip, dipDir, az) => Math.atan(Math.tan(dip * R) * Math.cos(
 async function buildData(a, b, opt) {
   const F = frame(a, b), N = 160;
   const samples = Array.from({ length: N + 1 }, (_, i) => ({ d: (F.len * i) / N, ...F.at((F.len * i) / N) }));
-  // stations near the line
-  const near = state.stations.filter(s => s.lat != null).map(s => ({ s, ...F.along(s) }))
-    .filter(o => o.off <= opt.buffer && o.d >= -opt.buffer && o.d <= F.len + opt.buffer);
+  // stations on the section: the chosen ones (section from stations), else those near the line
+  const near = opt.only
+    ? state.stations.filter(s => s.lat != null && opt.only.has(s.id)).map(s => ({ s, ...F.along(s) }))
+    : state.stations.filter(s => s.lat != null).map(s => ({ s, ...F.along(s) }))
+      .filter(o => o.off <= opt.buffer && o.d >= -opt.buffer && o.d <= F.len + opt.buffer);
   // ground elevation
   let demOk = true;
   try { (await demElevations(samples)).forEach((z, i) => { samples[i].z = z; }); }
@@ -96,7 +163,8 @@ async function buildData(a, b, opt) {
   });
   // apparent dips from Bedding measurements near the line (within twice the buffer)
   const dips = [];
-  for (const o of state.stations.filter(s => s.lat != null).map(s => ({ s, ...F.along(s) })).filter(o => o.off <= opt.buffer * 2)) {
+  const dipSource = opt.only ? near : state.stations.filter(s => s.lat != null).map(s => ({ s, ...F.along(s) })).filter(o => o.off <= opt.buffer * 2);
+  for (const o of dipSource) {
     for (const m of o.s.structures || []) if (/bedding/i.test(m.type || '') && m.dip != null) dips.push({ d: o.d, a: apparentDip(Number(m.dip), Number(m.dipDir), F.az), m, code: o.s.code });
   }
   const defA = apparentDip(opt.dip, opt.dipDir, F.az);
@@ -196,13 +264,13 @@ function sectionSvg(D, opt) {
 }
 
 // ---------- screen ----------
-async function openSection(a, b) {
+async function openSection(a, b, preset = {}) {
   // default dip: mean of all Bedding measurements in the project (Arabian Platform: gentle dips), else 1° toward 070
   const beds = state.stations.flatMap(s => (s.structures || []).filter(m => /bedding/i.test(m.type || '') && m.dip != null));
-  const opt = { buffer: 1000, ve: 10, depth: 300, dip: beds.length ? Math.round(beds.reduce((x, m) => x + Number(m.dip), 0) / beds.length) : 1, dipDir: beds.length ? Number(beds[0].dipDir) : 70 };
-  const body = openModal('Cross-section A–B', `
+  const opt = { buffer: 1000, ve: 10, depth: 300, dip: beds.length ? Math.round(beds.reduce((x, m) => x + Number(m.dip), 0) / beds.length) : 1, dipDir: beds.length ? Number(beds[0].dipDir) : 70, ...preset };
+  const body = openModal(preset.only ? `Cross-section · ${preset.only.size} stations` : 'Cross-section A–B', `
     <div class="grid2">
-      <div class="field"><label>Stations within (m)</label><input type="number" inputmode="decimal" id="sc-buf" value="${opt.buffer}"></div>
+      ${preset.only ? '<input type="hidden" id="sc-buf" value="1000">' : `<div class="field"><label>Stations within (m)</label><input type="number" inputmode="decimal" id="sc-buf" value="${opt.buffer}"></div>`}
       <div class="field"><label>Vertical exaggeration</label><select id="sc-ve">${[1, 2, 5, 10, 20, 50].map(v => `<option ${v === opt.ve ? 'selected' : ''}>${v}</option>`).join('')}</select></div>
       <div class="field"><label>Depth below lowest ground (m)</label><input type="number" inputmode="decimal" id="sc-depth" value="${opt.depth}"></div>
       <div class="field"><label>Default dip / dip direction</label><div style="display:flex;gap:6px"><input type="number" inputmode="decimal" id="sc-dip" value="${opt.dip}"><input type="number" inputmode="decimal" id="sc-dd" value="${opt.dipDir}"></div></div>
