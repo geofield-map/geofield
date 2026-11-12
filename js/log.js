@@ -16,8 +16,12 @@ export const LITH_GROUPS = [
   ['Clastics', ['Conglomerate', 'Breccia', 'Diamictite', 'Sandstone', 'Sandstone (bedded)', 'Arkose', 'Greywacke', 'Quartz arenite',
     'Siltstone', 'Siltstone (irregular)', 'Silty clay, Mudstone', 'Mudstone', 'Shale-Claystone', 'Shale', 'Claystone', 'Tillite']],
   ['Evaporites & chemical', ['Anhydrite', 'Gypsum', 'Salts', 'Halite', 'Evaporite', 'Chert', 'Ironstone', 'Phosphorite', 'Coal']],
-  ['Igneous & metamorphic', ['Granite', 'Granodiorite', 'Diorite', 'Gabbro', 'Syenite', 'Pegmatite', 'Aplite', 'Porphyry', 'Dolerite', 'Basalt',
-    'Andesite', 'Rhyolite', 'Quartz vein', 'Carbonate vein', 'Schist', 'Gneiss', 'Marble', 'Quartzite', 'Hornfels', 'Skarn']],
+  ['Igneous', ['Granite', 'Granodiorite', 'Tonalite', 'Diorite', 'Gabbro', 'Syenite', 'Monzonite', 'Pegmatite', 'Aplite', 'Porphyry',
+    'Dolerite', 'Basalt', 'Andesite', 'Dacite', 'Rhyolite', 'Tuff', 'Quartz vein', 'Carbonate vein']],
+  ['Metamorphic', ['Metasandstone', 'Metasiltstone', 'Metaconglomerate', 'Metagreywacke', 'Metapelite', 'Slate', 'Phyllite', 'Phyllonite',
+    'Schist', 'Mica schist', 'Quartz-mica schist', 'Chlorite schist', 'Talc schist', 'Graphite schist', 'Gneiss', 'Orthogneiss', 'Paragneiss',
+    'Augen gneiss', 'Migmatite', 'Quartzite', 'Marble', 'Calc-silicate', 'Metavolcanic', 'Metabasalt', 'Metagabbro', 'Amphibolite',
+    'Greenschist', 'Blueschist', 'Eclogite', 'Granulite', 'Hornfels', 'Skarn', 'Serpentinite', 'Mylonite', 'Cataclasite']],
   ['Other', ['Volcanics', 'Igneous (intrusive)', 'Metamorphic', 'Basement', 'Dune sand', 'Rootlets / palaeosol', 'Covered / no exposure']],
 ];
 const LOG_LITHS = [...new Set([...LITH_GROUPS.flatMap(g => g[1]), ...CHART_LITHOLOGIES, ...LITHOLOGIES.Sedimentary])];
@@ -31,9 +35,18 @@ const PATTERN_BY_NAME = {
   'silty clay, mudstone': 'p-mud', 'siltstone': 'p-silt', 'siltstone (irregular)': 'p-silt-irr', 'salts': 'p-salt', 'volcanics': 'p-volc',
   'basement': 'p-basement', 'dune sand': 'p-dune', 'rootlets / palaeosol': 'p-roots',
 };
+// metamorphic rocks first, so "Metasandstone" is not read as a sandstone or "Calc-silicate" as a carbonate
+const META_PATTERNS = [
+  [/slate/, 'p-slate'], [/phyllit|phyllonit|metapelit|metasilt|metamud|meta-?argil|meta-?shale/, 'p-phyllite'], [/schist/, 'p-schist'],
+  [/migmat/, 'p-migmatite'], [/gneiss/, 'p-gneiss'], [/quartzit/, 'p-quartzite'], [/marble|calc-?silicate/, 'p-marble'],
+  [/metasand|metaconglom|metagreywack|metaarkos|metased/, 'p-metased'],
+  [/amphibol|greenschist|blueschist|metabas|metavolc|metagabbr|metadoler|metaandes|eclogit|granulit/, 'p-amphib'],
+  [/hornfels/, 'p-hornfels'], [/skarn/, 'p-skarn'], [/mylonit|cataclasit/, 'p-mylonite'], [/serpentin|talc|soapstone/, 'p-serp'],
+];
 function patternFor(lith = '') {
   const l = lith.toLowerCase().trim();
   if (PATTERN_BY_NAME[l]) return PATTERN_BY_NAME[l];
+  for (const [re, p] of META_PATTERNS) if (re.test(l)) return p;
   if (l.includes('covered')) return 'p-covered';
   if (l.includes('basement')) return 'p-basement';
   if (l.includes('salt') || l.includes('halite')) return 'p-salt';
@@ -101,6 +114,20 @@ const PATTERNS = [
   ['p-basement', 16, 12, '#C9619B', '<path d="M2 3L5 1M9 5L12 2M4 9L7 7M11 11L14 8M14 4L16 3" stroke="INK" stroke-width=".7"/>'],
   ['p-ign', 14, 14, '#F4B6B6', '<path d="M3 1V7M0 4H6M10 8V14M7 11H13" stroke="INK"/>'],
   ['p-meta', 20, 8, '#C8D9B4', '<path d="M0 4Q5 0 10 4T20 4" stroke="INK" fill="none"/>'],
+  // metamorphic families (no Aramco key for these: conventional symbols, soft colours)
+  ['p-slate', 12, 6, '#AEB9C2', '<path d="M0 1.5H12M0 4.5H12" stroke="INK" stroke-width=".5"/><path d="M2 0L4 6M8 0L10 6" stroke="INK" stroke-width=".35"/>'],
+  ['p-phyllite', 12, 7, '#B9C9B6', '<path d="M0 2q1.5 -1.2 3 0t3 0t3 0t3 0M0 5.5q1.5 -1.2 3 0t3 0t3 0t3 0" fill="none" stroke="INK" stroke-width=".55"/>'],
+  ['p-schist', 20, 9, '#C9B6D9', '<path d="M0 3Q5 0 10 3T20 3M0 7.5Q5 4.5 10 7.5T20 7.5" fill="none" stroke="INK" stroke-width=".7"/><path d="M3 5.2h2.5M13 1h2.5" stroke="INK" stroke-width=".9"/>'],
+  ['p-gneiss', 20, 12, '#E9B3C9', '<path d="M0 3Q5 0.5 10 3T20 3" fill="none" stroke="INK" stroke-width="1.1"/><path d="M0 9Q5 6.5 10 9T20 9" fill="none" stroke="INK" stroke-width=".5" stroke-dasharray="2 1.5"/><circle cx="5" cy="6" r=".7" fill="INK"/><circle cx="15" cy="6" r=".7" fill="INK"/>'],
+  ['p-migmatite', 20, 12, '#E4A7BE', '<path d="M0 4C4 0 6 8 10 4S16 0 20 4" fill="none" stroke="INK" stroke-width=".8"/><path d="M4 9V11M3 10H5M14 8V10M13 9H15" stroke="INK" stroke-width=".7"/>'],
+  ['p-quartzite', 10, 10, '#F1E7CF', '<circle cx="2" cy="2" r=".8" fill="INK"/><circle cx="7" cy="7" r=".8" fill="INK"/><path d="M5 2.5H8.5M0.5 7.5H4" stroke="INK" stroke-width=".6"/>'],
+  ['p-marble', 16, 12, '#DCEBF5', '<path d="M0 0H16M0 6H16M4 0V6M12 6V12" stroke="INK" stroke-width=".6" fill="none"/><path d="M6 4.5L9 1.5M14 10.5L16 8.5M0 10.5L2 8.5" stroke="INK" stroke-width=".5"/>'],
+  ['p-metased', 16, 10, '#E3D3B5', '<circle cx="3" cy="2.5" r=".8" fill="INK"/><circle cx="11" cy="3" r=".8" fill="INK"/><path d="M0 7.5q4 -2.2 8 0t8 0" fill="none" stroke="INK" stroke-width=".6"/>'],
+  ['p-amphib', 12, 10, '#86AE90', '<path d="M1 2L4 4M7 6.5L10 4.5M2 8.5L5 9.5M8 1L10 2" stroke="INK" stroke-width=".8"/>'],
+  ['p-hornfels', 8, 8, '#A3AAAE', '<circle cx="1.5" cy="2" r=".6" fill="INK"/><circle cx="5.5" cy="1.5" r=".45" fill="INK"/><circle cx="3.5" cy="5.5" r=".6" fill="INK"/><circle cx="7" cy="6.5" r=".45" fill="INK"/>'],
+  ['p-skarn', 14, 12, '#BCD59C', '<path d="M3 1V5M1 3H5M10 7V11M8 9H12" stroke="INK" stroke-width=".7"/><circle cx="10" cy="2.5" r=".8" fill="INK"/><circle cx="3" cy="9.5" r=".8" fill="INK"/>'],
+  ['p-mylonite', 16, 6, '#C2B4A6', '<path d="M0 1H16M0 3H16M0 5H16" stroke="INK" stroke-width=".4"/><ellipse cx="8" cy="3" rx="3" ry="1.2" fill="none" stroke="INK" stroke-width=".6"/>'],
+  ['p-serp', 14, 10, '#6E9C77', '<path d="M0 8Q3 2 7 5T14 2" fill="none" stroke="INK" stroke-width=".7"/>'],
   ['p-dune', 24, 12, '#FFF3CF', '<path d="M0 10Q8 2 16 10M6 10Q12 5 18 10M14 10Q20 3 24 6" fill="none" stroke="INK" stroke-width=".6"/>'],
   ['p-roots', 16, 14, '#EFE3C8', '<path d="M8 2V8M8 8L5 12M8 8L11 12M8 6L6 8" fill="none" stroke="INK" stroke-width=".8"/>'],
   ['p-covered', 8, 8, '#FFFFFF', '<path d="M0 8L8 0" stroke="#aaa"/>'],
@@ -274,7 +301,9 @@ function grainIndex(bed, top = false) {
   if (['p-silt', 'p-silt-irr'].includes(p)) return 1;
   if (['p-congl', 'p-breccia', 'p-diamictite'].includes(p)) return 8;
   if (['p-sand', 'p-sand-bed', 'p-dune'].includes(p)) return 4;
-  if (['p-ign', 'p-meta', 'p-basement', 'p-volc', 'p-blank'].includes(p)) return 4;
+  if (['p-slate', 'p-phyllite', 'p-mylonite'].includes(p)) return 1; // fine-grained metamorphic rocks: narrow, like shale
+  if (['p-ign', 'p-meta', 'p-basement', 'p-volc', 'p-blank', 'p-schist', 'p-gneiss', 'p-migmatite', 'p-quartzite', 'p-marble',
+    'p-metased', 'p-amphib', 'p-hornfels', 'p-skarn', 'p-serp'].includes(p)) return 4;
   return 2; // carbonates, evaporites, chert, coal
 }
 
@@ -1427,7 +1456,8 @@ function editBed(st, index) {
     const l = v('#bd-lith');
     aramco.querySelector('.cf-sw').style.cssText = l ? `background:${DEFAULT_FILL[patternFor(l)]}` : 'background:transparent;border-style:dashed';
     const t = aramco.querySelector('.cf-text');
-    t.textContent = l ? `Saudi Aramco · ${l}` : 'Choose a lithology first';
+    // igneous and metamorphic rocks are not in the Aramco Lithology Key: their colour is a standard one
+    t.textContent = l ? `${/^p-(ign|meta|slate|phyllite|schist|gneiss|migmatite|quartzite|marble|metased|amphib|hornfels|skarn|mylonite|serp)$/.test(patternFor(l)) ? 'Standard colour' : 'Saudi Aramco'} · ${l}` : 'Choose a lithology first';
     t.classList.toggle('placeholder', !l);
   };
   body.querySelector('#bd-lith').addEventListener('change', showAramco);
