@@ -688,11 +688,18 @@ export function logSvg(st) {
       s += colourFill(`cf${i}`, d, colX, y, Math.max(w, wTop) + 12, h, bc);
       s += `<path d="${d}" fill="url(#${pat}${isDark(inkBase(bc)) ? '-l' : ''})" stroke="#000" stroke-width="1"/>`;
     }
-    // modifier symbols in a row across the middle of the bed
+    // modifier symbols scattered over the whole bed (staggered rows), so it reads as "the entire bed is ferruginous"
     const modsHere = (b.modifiers || []).filter(m => MOD_GLYPH[m]);
     if (modsHere.length && h >= 7) {
-      const usable = Math.min(w, wTop) - 10, n = Math.max(1, Math.min(6, Math.floor(usable / 14)));
-      for (let k = 0; k < n; k++) s += glyphAt(modsHere[k % modsHere.length], colX + 6 + (usable * (k + 0.5)) / n, y + h / 2);
+      const usable = Math.min(w, wTop) - 10, n = Math.max(1, Math.min(8, Math.floor(usable / 22)));
+      const rows = Math.max(1, Math.floor((h - 4) / 20)), rowH = h / rows;
+      let c = 0;
+      for (let r = 0; r < rows; r++) {
+        const shift = rows > 1 && n > 1 && r % 2 ? 0.5 : 0, cy = y + rowH * (r + 0.5);
+        const m = shift ? n - 1 : n;
+        for (let k = 0; k < m; k++) s += glyphAt(modsHere[(c++) % modsHere.length], colX + 6 + (usable * (k + 0.5 + shift)) / n, cy);
+        if (modsHere.length > 1 && m % modsHere.length === 0) c++; // keep different modifiers from stacking in columns
+      }
     }
     // structure symbols: two per row in the Structures column, centred on the bed, shrunk to fit thin beds
     const symsHere = (b.structSyms || []).filter(n => STRUCT_GLYPH[n]);
