@@ -3,7 +3,7 @@ import { state, saveStation, getStation } from './state.js';
 import { db, uid } from './db.js';
 import { $, esc, openModal, closeModal, toast, confirmBox, saveFile, resetViewport, loadScript } from './ui.js';
 import { LITHOLOGIES } from './schema.js';
-import { FORMATION_NAMES, findFormation, CHART_LITHOLOGIES, chronoColour, formationColour } from './strat.js';
+import { FORMATIONS, FORMATION_NAMES, findFormation, CHART_LITHOLOGIES, chronoColour, formationColour } from './strat.js';
 import { colourFieldHtml, bindColourField, colourHex } from './colours.js';
 
 export const GRAINS = ['Clay', 'Silt', 'Very fine sand', 'Fine sand', 'Medium sand', 'Coarse sand', 'Very coarse sand', 'Granule', 'Pebble', 'Cobble', 'Boulder'];
@@ -733,7 +733,8 @@ export function renderLog() {
   body.innerHTML = `
     <div class="card"><div class="kv"><div>Station</div><div>${esc(st.code)} · ${esc(st.attrs.formation || 'formation not set')}</div>
       <div>Beds</div><div>${beds.length} · total ${Math.round(total * 100) / 100} m</div></div>
-      <div class="btns"><button class="btn primary" id="lg-add">+ Add bed on top</button><button class="btn" id="lg-open">Station data</button></div></div>
+      <div class="btns"><button class="btn primary" id="lg-add">+ Add bed on top</button><button class="btn" id="lg-open">Station data</button></div>
+      <div class="btns" style="margin-top:0"><button class="btn" id="lg-build">Build log from stations…</button></div></div>
     ${beds.length ? `<div class="log-svg-wrap">${logSvg(st)}</div>
       <div class="card"><table class="tbl"><tr><th>#</th><th>Lithology</th><th>m</th><th>Grain / texture</th></tr>
       ${beds.map((b, i) => ({ b, i })).reverse().map(({ b, i }) => `<tr data-i="${i}"><td>${i + 1}</td><td>${esc(b.lithology ? bedName(b) : '')}${b.formation || b.unit ? `<div class="muted">${esc([b.formation, b.member, b.unit].filter(Boolean).join(' / '))}</div>` : ''}</td><td>${b.estimated ? '~' : ''}${esc(b.thickness)}</td><td>${esc((isCarbonate(b.lithology) && b.texture ? [b.texture, b.textureTop] : [b.grain, b.grainTop]).filter(Boolean).join(' → '))}</td></tr>`).join('')}
@@ -743,6 +744,7 @@ export function renderLog() {
     : '<div class="empty">No beds yet. Start from the base of the section and add beds upward.</div>'}`;
   $('#lg-add').onclick = () => editBed(st, null);
   $('#lg-open').onclick = () => nav.openStation(st.id, 'data');
+  $('#lg-build').onclick = buildLogDialog;
   body.querySelectorAll('tr[data-i]').forEach(r => bindBedRow(r, st));
   const svgBtn = $('#lg-svg');
   if (svgBtn) {
@@ -822,6 +824,94 @@ function bindBedRow(row, st) {
 }
 
 const bedLabel = (b, n) => `${n}. ${b.lithology || 'Bed'}${b.thickness ? ' · ' + b.thickness + ' m' : ''}`;
+
+// ---------- build a log from field stations ----------
+// One bed per chosen station (lithology, formation, member, grain size, structures, cement, fossils, remarks,
+// sample), stacked by time taken, elevation or formation age. Thickness from the height difference between
+// stations (estimated) or a fixed value. The log goes into a new log station placed at the first station.
+const SED_TO_SYM = {
+  'Planar lamination': 'Parallel lamination', 'Cross-bedding (planar)': 'Planar cross-bedding', 'Cross-bedding (trough)': 'Trough cross-bedding',
+  'Ripple marks': 'Ripple lamination', 'Graded bedding': 'Graded bedding', 'Mud cracks': 'Mud cracks', 'Load casts': 'Load casts / flames',
+  Bioturbation: 'Bioturbation', Nodules: 'Concretions / nodules', Massive: 'Massive',
+};
+const CEMENT_TO_MOD = { Calcareous: 'Calcareous', Siliceous: 'Silicified', Ferruginous: 'Ferruginous', Gypsiferous: 'Gypsiferous', Dolomitic: 'Dolomitic', 'Clay matrix': 'Argillaceous' };
+const ageRank = name => { const i = FORMATIONS.findIndex(f => f === findFormation(name)); return i < 0 ? -1 : i; }; // bigger = older
+
+export function bedsFromStations(list, opt) {
+  const sorted = list.slice();
+  if (opt.order === 'elevation') sorted.sort((a, b) => (a.elev ?? 0) - (b.elev ?? 0));
+  else if (opt.order === 'age') sorted.sort((a, b) => ageRank(b.attrs.formation) - ageRank(a.attrs.formation) || (a.elev ?? 0) - (b.elev ?? 0));
+  else sorted.sort((a, b) => (a.created || '').localeCompare(b.created || ''));
+  let beds = sorted.map((s, i) => {
+    const a = s.attrs || {}, next = sorted[i + 1];
+    let th = Number(opt.fixed) || 1, estimated = true;
+    if (opt.thickness === 'elevation' && next && s.elev != null && next.elev != null) th = Math.max(0.5, Math.round(Math.abs(next.elev - s.elev) * 10) / 10);
+    else if (opt.thickness !== 'elevation') estimated = false;
+    return {
+      id: uid(), thickness: th, estimated, contact: 'Sharp', lithology: a.lithology || '', grain: GRAINS.includes(a.grain_size) ? a.grain_size : '',
+      formation: a.formation || '', member: a.member || '', modifiers: CEMENT_TO_MOD[a.cement] ? [CEMENT_TO_MOD[a.cement]] : [],
+      structSyms: SED_TO_SYM[a.sed_structures] ? [SED_TO_SYM[a.sed_structures]] : [], inter: [], fossils: a.fossils || '',
+      description: a.remarks || '', sample: a.sample_no != null && a.sample_no !== '' ? String(a.sample_no) : '', color: '', station: s.code,
+    };
+  });
+  if (opt.merge) {
+    // neighbours with the same rock and formation become one bed (descriptions summarised)
+    const out = [];
+    for (const b of beds) {
+      const prev = out[out.length - 1];
+      if (prev && prev.lithology === b.lithology && prev.formation === b.formation) {
+        const m = mergeBeds(prev, b, { how: 'same' });
+        m.description = mergedDescription(prev, b, m); delete m.mergedFrom;
+        out[out.length - 1] = m;
+      } else out.push(b);
+    }
+    beds = out;
+  }
+  return beds;
+}
+
+export function buildLogDialog() {
+  const list = state.stations.filter(s => !s.isLog).slice().sort((a, b) => (b.created || '').localeCompare(a.created || ''));
+  if (!list.length) { toast('No stations yet'); return; }
+  const day = s => (s.created || '').slice(0, 10) || 'No date';
+  const days = [...new Set(list.map(day))];
+  const body = openModal('Build log from stations', `
+    <div class="btns" style="margin-top:0"><button class="btn small" id="bl-all">Select all</button><button class="btn small" id="bl-none">Select none</button></div>
+    <div id="bl-list" style="max-height:38vh;overflow:auto">${days.map(d => `<div class="ex-day">
+      <label class="check bm-layer ex-dayhead"><input type="checkbox" class="bl-day" ${d === days[0] ? 'checked' : ''}> <b>${esc(d)}</b></label>
+      ${list.filter(s => day(s) === d).map(s => `<label class="check bm-layer ex-st"><input type="checkbox" data-id="${s.id}" ${d === days[0] ? 'checked' : ''}> ${esc(s.code)}
+        <span class="muted">${esc([s.attrs.lithology, s.attrs.formation, s.elev != null ? Math.round(s.elev) + ' m' : ''].filter(Boolean).join(' · '))}</span></label>`).join('')}</div>`).join('')}</div>
+    <div class="field"><label>Order (base of the log first)</label><select id="bl-order">
+      <option value="time">By time taken (first station = base)</option><option value="elevation">By elevation (lowest = base)</option><option value="age">By formation age (oldest = base)</option></select></div>
+    <div class="grid2">
+      <div class="field"><label>Thickness</label><select id="bl-th"><option value="elevation">From height difference (~)</option><option value="fixed">Same for every bed</option></select></div>
+      <div class="field"><label>Fixed / last bed (m)</label><input type="number" inputmode="decimal" step="any" id="bl-fixed" value="1"></div></div>
+    <label class="check small-check choice"><input type="checkbox" id="bl-merge" checked> Merge neighbouring stations with the same rock and formation</label>
+    <div class="btns"><button class="btn primary" id="bl-go">Build log</button></div>`);
+  const boxes = () => [...body.querySelectorAll('input[data-id]')];
+  const count = () => { const n = boxes().filter(b => b.checked).length; body.querySelector('#bl-go').textContent = `Build log from ${n} station${n === 1 ? '' : 's'}`; };
+  body.querySelector('#bl-all').onclick = () => { body.querySelectorAll('input[type=checkbox]:not(#bl-merge)').forEach(b => { b.checked = true; }); count(); };
+  body.querySelector('#bl-none').onclick = () => { body.querySelectorAll('input[type=checkbox]:not(#bl-merge)').forEach(b => { b.checked = false; }); count(); };
+  body.querySelectorAll('.bl-day').forEach(c => c.onchange = () => { c.closest('.ex-day').querySelectorAll('input[data-id]').forEach(b => { b.checked = c.checked; }); count(); });
+  boxes().forEach(b => b.onchange = count);
+  body.querySelector('#bl-go').onclick = async () => {
+    const chosen = boxes().filter(b => b.checked).map(b => list.find(s => s.id === b.dataset.id));
+    if (chosen.length < 1) { toast('Select at least one station'); return; }
+    const opt = { order: body.querySelector('#bl-order').value, thickness: body.querySelector('#bl-th').value, fixed: Number(body.querySelector('#bl-fixed').value) || 1, merge: body.querySelector('#bl-merge').checked };
+    const beds = bedsFromStations(chosen, opt);
+    const first = chosen.slice().sort((a, b) => (a.created || '').localeCompare(b.created || ''))[0];
+    const n = state.stations.filter(s => s.isLog).length + 1;
+    const fm = beds.map(b => b.formation).filter(Boolean);
+    const st = { id: uid(), projectId: state.project.id, code: `LOG-${String(n).padStart(3, '0')}`, created: new Date().toISOString(), isLog: true,
+      lat: first.lat, lon: first.lon, elev: first.elev, easting: first.easting, northing: first.northing, utmZone: first.utmZone,
+      attrs: { formation: fm[0] || '', remarks: `Log built from ${chosen.length} stations: ${chosen.map(s => s.code).join(', ')}` }, structures: [], log: { beds } };
+    await saveStation(st);
+    closeModal();
+    state.currentStationId = st.id; renderLog();
+    toast(`${st.code}: ${beds.length} beds from ${chosen.length} stations`);
+  };
+  count();
+}
 
 // Repeat a group of beds (a cycle) several times: copies go straight on top of the group.
 function repeatBeds(st) {
