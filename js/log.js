@@ -283,6 +283,7 @@ function stripCode(text) {
 export const MODIFIERS = [
   ['Ferruginous', '<text y="2.6" font-size="7.5" font-weight="bold" text-anchor="middle" fill="#b3261e">Fe</text>'],
   ['Hematitic', '<text y="2.6" font-size="7.5" font-weight="bold" text-anchor="middle" fill="#7a1010">He</text>'],
+  ['Limonitic', '<text y="2.6" font-size="7.5" font-weight="bold" text-anchor="middle" fill="#a8740f">Li</text>'], // yellow-brown, as limonite
   ['Glauconitic', '<circle cx="-2.2" cy="1" r="1.4" fill="#2e8b3a"/><circle cx="2.2" cy="1" r="1.4" fill="#2e8b3a"/><circle cx="0" cy="-2" r="1.4" fill="#2e8b3a"/>'],
   ['Calcareous', '<path d="M-3.5 -2H3.5M0 -2V2.5" stroke="#000" stroke-width="1" fill="none"/>'],
   ['Dolomitic', '<path d="M-3.5 -2H3.5M-1.2 -2L1.2 2.5" stroke="#000" stroke-width="1" fill="none"/>'],
